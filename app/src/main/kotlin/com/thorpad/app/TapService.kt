@@ -67,8 +67,31 @@ class TapService : AccessibilityService() {
         // returning false from onKeyEvent lets the key through untouched.
         serviceInfo = (serviceInfo ?: AccessibilityServiceInfo()).apply {
             flags = flags or AccessibilityServiceInfo.FLAG_REQUEST_FILTER_KEY_EVENTS
+            if (Build.VERSION.SDK_INT >= 34) {
+                flags = flags or AccessibilityServiceInfo.FLAG_SEND_MOTION_EVENTS
+            }
+        }
+
+        if (Build.VERSION.SDK_INT >= 34) {
+            stickSource = try {
+                serviceInfo = serviceInfo.apply {
+                    setMotionEventSources(
+                        android.view.InputDevice.SOURCE_JOYSTICK or
+                            android.view.InputDevice.SOURCE_GAMEPAD
+                    )
+                }
+                "accessibility motion events"
+            } catch (e: Throwable) {
+                "refused: ${e.message}"
+            }
+        } else {
+            stickSource = "unavailable below Android 14"
         }
     }
+
+    /** How sticks are being read, for saying so on screen. */
+    @Volatile var stickSource: String = "not started"
+        private set
 
     /**
      * Every key on the device passes through here.
@@ -79,6 +102,23 @@ class TapService : AccessibilityService() {
      */
     override fun onKeyEvent(event: KeyEvent): Boolean =
         OverlayService.instance?.onKey(event) ?: false
+
+    /**
+     * Gamepad sticks, on Android 14 and up.
+     *
+     * Analog axes are motion events, not key events, and before 14 an
+     * accessibility service could not see them at all — the only route was a
+     * window that held focus, which costs the back button. From 14 the system
+     * will simply hand them over.
+     *
+     * Never consumed: anything else that reads the pad still gets it.
+     */
+    override fun onMotionEvent(event: android.view.MotionEvent) {
+        OverlayService.instance?.onMotion(event)
+    }
+
+    /** Whether sticks can be read at all on this device. */
+    val canReadSticks: Boolean get() = Build.VERSION.SDK_INT >= 34
 
     override fun onDestroy() {
         instance = null
@@ -175,40 +215,82 @@ class TapService : AccessibilityService() {
         return ok
     }
 
-    /** One finger held down, as a chain of continued strokes. */
-    private inner class Hold(val id: String, val x: Float, val y: Float) {
+    /**
+     * Starts a finger that can be dragged, and keeps dragging until released.
+     *
+     * Separate from [startHold] only in that the destination can change: a
+     * stick needs the finger to keep moving, and a stroke that has already been
+     * described cannot be redirected, so each segment aims at wherever the
+     * target is when the previous one finishes. That completion is also the
+     * pacing — asking where the stick is more often than a segment finishes
+     * only queues work the system cannot deliver.
+     */
+    fun startDrag(id: String, x: Float, y: Float) {
+        if (held.containsKey(id)) return
+        val hold = Hold(id, x, y, segmentMs = 24L)
+        held[id] = hold
+        hold.begin()
+    }
+
+    /** Moves an already-started finger. Ignored if it is not down. */
+    fun dragTo(id: String, x: Float, y: Float) {
+        held[id]?.aimAt(x, y)
+    }
+
+    fun isDown(id: String): Boolean = held.containsKey(id)
+
+    /** One finger down, as a chain of continued strokes. */
+    private inner class Hold(
+        val id: String,
+        startX: Float,
+        startY: Float,
+        private val segmentMs: Long = 120L,
+    ) {
         private var previous: GestureDescription.StrokeDescription? = null
         private var alive = true
 
-        private val segmentMs = 120L
+        private var atX = startX
+        private var atY = startY
 
-        fun begin() {
-            step(first = true)
+        @Volatile private var wantX = startX
+        @Volatile private var wantY = startY
+
+        fun aimAt(x: Float, y: Float) {
+            wantX = x
+            wantY = y
         }
+
+        fun begin() = step(first = true)
 
         fun end() {
             alive = false
             val last = previous ?: return
             previous = null
-            val path = Path().apply {
-                moveTo(x, y)
-                lineTo(x + 0.1f, y)
-            }
-            dispatch(last.continueStroke(path, 0, 40, false), null)
+            dispatch(last.continueStroke(pathTo(atX, atY), 0, 40, false), null)
+        }
+
+        private fun pathTo(x: Float, y: Float): Path = Path().apply {
+            moveTo(atX, atY)
+            // A stroke whose ends are identical is rejected as empty, so a
+            // stationary finger still needs a tenth of a pixel of travel.
+            if (x == atX && y == atY) lineTo(x + 0.1f, y) else lineTo(x, y)
         }
 
         private fun step(first: Boolean) {
             if (!alive) return
-            val path = Path().apply {
-                moveTo(x, y)
-                lineTo(x + 0.1f, y)
-            }
+            val toX = wantX
+            val toY = wantY
+            val path = pathTo(toX, toY)
+
             val stroke = if (first || previous == null) {
                 GestureDescription.StrokeDescription(path, 0, segmentMs, true)
             } else {
                 previous!!.continueStroke(path, 0, segmentMs, true)
             }
             previous = stroke
+            atX = toX
+            atY = toY
+
             dispatch(stroke) { if (alive) step(first = false) }
         }
     }

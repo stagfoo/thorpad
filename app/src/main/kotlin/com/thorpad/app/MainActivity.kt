@@ -133,7 +133,17 @@ class MainActivity : Activity() {
             )
         )
 
-        root.addView(wide("Add a control") { addControl() })
+        val adders = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
+        adders.addView(button("Add a button") { addControl() })
+        adders.addView(button("Add a stick") { addStick() })
+        root.addView(adders)
+        root.addView(
+            note(
+                "A button taps one point. A stick drags a finger around a " +
+                    "region — which is what a game reads for aiming, since " +
+                    "there is no button to bind for that."
+            )
+        )
 
         controls = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -181,6 +191,11 @@ class MainActivity : Activity() {
             service?.lastKey?.takeIf { it != 0 }?.let {
                 append(" (last ${Buttons.nameOf(it)})")
             }
+            if (service?.layout?.usesSticks == true) {
+                append("\nstick events: ${service?.motionSeen ?: 0}")
+                append(" · ${service?.lastStick ?: "—"}")
+                append("\nstick source: ${tapper?.stickSource ?: "—"}")
+            }
             append("\ntaps sent: ${tapper?.sent ?: 0}")
             append(", completed: ${tapper?.completed ?: 0}")
             (tapper?.refused ?: 0).takeIf { it > 0 }?.let { append(", refused: $it") }
@@ -206,8 +221,13 @@ class MainActivity : Activity() {
             }
 
             box.addView(TextView(this).apply {
-                text = "${control.label}  →  ${Buttons.nameOf(control.keyCode)}" +
-                    if (control.press == Press.HOLD) "  (hold)" else ""
+                text = when {
+                    control.isStick && control.bound ->
+                        "${control.label}  →  ${control.stick!!.name.lowercase()} stick"
+                    control.isStick -> "${control.label}  →  no stick"
+                    else -> "${control.label}  →  ${Buttons.nameOf(control.keyCode)}" +
+                        if (control.press == Press.HOLD) "  (hold)" else ""
+                }
                 setTextColor(
                     if (control.bound) Color.parseColor("#D7DEE5")
                     else Color.parseColor("#E0725A")
@@ -216,16 +236,25 @@ class MainActivity : Activity() {
                 layoutParams = LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f)
             })
 
-            box.addView(button("Bind") { learn(control.id) })
-            box.addView(button(if (control.press == Press.HOLD) "Tap" else "Hold") {
-                update(
-                    layoutNow().replace(
-                        control.copy(
-                            press = if (control.press == Press.HOLD) Press.TAP else Press.HOLD
+            if (control.isStick) {
+                box.addView(button("Left") {
+                    update(layoutNow().bindStick(control.id, Stick.LEFT))
+                })
+                box.addView(button("Right") {
+                    update(layoutNow().bindStick(control.id, Stick.RIGHT))
+                })
+            } else {
+                box.addView(button("Bind") { learn(control.id) })
+                box.addView(button(if (control.press == Press.HOLD) "Tap" else "Hold") {
+                    update(
+                        layoutNow().replace(
+                            control.copy(
+                                press = if (control.press == Press.HOLD) Press.TAP else Press.HOLD
+                            )
                         )
                     )
-                )
-            })
+                })
+            }
             box.addView(button("×") { update(layoutNow().remove(control.id)) })
 
             controls.addView(box)
@@ -262,6 +291,40 @@ class MainActivity : Activity() {
             )
         )
     }
+
+    /**
+     * A stick control, covering the whole screen by default.
+     *
+     * Full size because travel is the whole problem: a drag ends at the edge of
+     * its region and has to lift and start again, so a smaller region only
+     * means more of those hitches.
+     */
+    private fun addStick() {
+        val layout = layoutNow()
+        if (!stickSupport()) {
+            // Still added, so the layout can be built ready — but say plainly
+            // that nothing will drive it on this Android version.
+            status.text = "Sticks need Android 14 or newer. Added anyway, but " +
+                "it will not move until then."
+        }
+        val taken = layout.sticks().mapNotNull { it.stick }.toSet()
+        val free = Stick.entries.firstOrNull { it !in taken }
+        update(
+            layout.add(
+                Control(
+                    id = Layout.nextId(layout),
+                    label = "aim",
+                    keyCode = 0,
+                    x = 0.5f,
+                    y = 0.5f,
+                    kind = Kind.STICK,
+                    stick = free ?: Stick.RIGHT,
+                )
+            )
+        )
+    }
+
+    private fun stickSupport(): Boolean = Build.VERSION.SDK_INT >= 34
 
     /** Somewhere new for each added control, so they do not stack on one point. */
     private fun nextSpot(existing: Int): Pair<Float, Float> {

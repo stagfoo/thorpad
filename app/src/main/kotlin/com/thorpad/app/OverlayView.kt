@@ -61,6 +61,21 @@ class OverlayView(context: Context) : View(context) {
         textAlign = Paint.Align.CENTER
         textSize = 20f
     }
+    private val banner = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#FFD54A")
+        textAlign = Paint.Align.LEFT
+        textSize = 24f
+        isFakeBoldText = true
+    }
+    private val region = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 2f
+        pathEffect = android.graphics.DashPathEffect(floatArrayOf(12f, 10f), 0f)
+    }
+
+    /** Tapping this flips out of editing, so the app need not be reopened. */
+    var onDone: (() -> Unit)? = null
+    private var doneRect: android.graphics.RectF? = null
 
     private var dragging: String? = null
 
@@ -80,6 +95,24 @@ class OverlayView(context: Context) : View(context) {
         val radius = radiusFor()
         val now = SystemClock.uptimeMillis()
         var animating = false
+
+        // A stick's region first and underneath, so it reads as the area the
+        // finger will travel in rather than as another control.
+        for (control in layout.controls) {
+            if (!control.isStick) continue
+            val box = control.region()
+            region.color = if (control.bound) {
+                Color.parseColor("#6FC9FF")
+            } else {
+                Color.parseColor("#E0725A")
+            }
+            region.alpha = if (editing) 170 else 50
+            canvas.drawRect(
+                box.left * width, box.top * height,
+                box.right * width, box.bottom * height,
+                region,
+            )
+        }
 
         for (control in layout.controls) {
             val cx = control.x * width
@@ -119,17 +152,48 @@ class OverlayView(context: Context) : View(context) {
             if (editing) {
                 small.alpha = 220
                 canvas.drawText(
-                    if (control.bound) {
-                        Buttons.nameOf(control.keyCode) +
+                    when {
+                        control.isStick && control.bound ->
+                            "${control.stick!!.name.lowercase()} stick"
+                        control.isStick -> "no stick"
+                        control.bound -> Buttons.nameOf(control.keyCode) +
                             if (control.press == Press.HOLD) " · hold" else ""
-                    } else {
-                        "unbound"
+                        else -> "unbound"
                     },
                     cx,
                     cy + radius + 26f,
                     small,
                 )
             }
+        }
+
+        if (editing) {
+            // Said outright, because the reason taps do nothing while editing
+            // is not guessable: the overlay has to accept touches so controls
+            // can be dragged, which means it also catches the taps meant for
+            // the game.
+            canvas.drawText("EDITING — buttons won't reach the game", 24f, 48f, banner)
+            small.alpha = 255
+            small.textAlign = Paint.Align.LEFT
+            canvas.drawText("drag to place · tap DONE when finished", 24f, 76f, small)
+            small.textAlign = Paint.Align.CENTER
+
+            val w = 150f
+            val h = 64f
+            val rect = android.graphics.RectF(
+                width - w - 24f, 24f, width - 24f, 24f + h,
+            )
+            doneRect = rect
+            fill.color = Color.parseColor("#7FD7A3")
+            fill.alpha = 60
+            canvas.drawRoundRect(rect, 14f, 14f, fill)
+            ring.color = Color.parseColor("#7FD7A3")
+            ring.alpha = 230
+            canvas.drawRoundRect(rect, 14f, 14f, ring)
+            text.alpha = 255
+            canvas.drawText("DONE", rect.centerX(), rect.centerY() + 9f, text)
+        } else {
+            doneRect = null
         }
 
         flashes.entries.removeAll { now - it.value >= flashMs }
@@ -142,6 +206,12 @@ class OverlayView(context: Context) : View(context) {
 
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
+                doneRect?.let { rect ->
+                    if (rect.contains(event.x, event.y)) {
+                        onDone?.invoke()
+                        return true
+                    }
+                }
                 val hit = layout.controls.firstOrNull {
                     val dx = it.x * width - event.x
                     val dy = it.y * height - event.y

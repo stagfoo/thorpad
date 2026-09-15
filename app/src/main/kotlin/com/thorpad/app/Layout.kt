@@ -16,6 +16,17 @@ import org.json.JSONObject
  * being saved — can be checked without a device.
  */
 
+enum class Kind {
+    /** A button that taps or holds one point. */
+    BUTTON,
+
+    /** A stick that drags a finger around a region. */
+    STICK,
+}
+
+/** Which stick drives a [Kind.STICK] control. */
+enum class Stick { LEFT, RIGHT }
+
 enum class Press {
     /** Down and up, one quick touch. */
     TAP,
@@ -29,17 +40,54 @@ data class Control(
     val label: String,
     /** Android keycode of the button that fires it, or 0 if unbound. */
     val keyCode: Int,
-    /** Fraction of the screen, 0..1. */
+    /** Fraction of the screen, 0..1. For a stick, the centre of its region. */
     val x: Float,
     val y: Float,
     val press: Press = Press.TAP,
+    val kind: Kind = Kind.BUTTON,
+    val stick: Stick? = null,
+    /**
+     * For a stick, how much of the screen the finger may drag across, as
+     * fractions of it.
+     *
+     * The whole screen by default, because travel is the whole problem: a
+     * stroke ends at the edge of its region and has to start again, so anything
+     * smaller is throwing away swing for nothing.
+     */
+    val width: Float = 1f,
+    val height: Float = 1f,
 ) {
     fun movedTo(nx: Float, ny: Float) = copy(
         x = nx.coerceIn(0f, 1f),
         y = ny.coerceIn(0f, 1f),
     )
 
-    val bound: Boolean get() = keyCode != 0
+    val isStick: Boolean get() = kind == Kind.STICK
+
+    /** A button needs a key; a stick needs a stick. */
+    val bound: Boolean
+        get() = if (isStick) stick != null else keyCode != 0
+
+    /** The region this stick may drag in, clamped to the screen. */
+    fun region(): AimSettings.Region {
+        val halfW = (width / 2f).coerceIn(0.05f, 0.5f)
+        val halfH = (height / 2f).coerceIn(0.05f, 0.5f)
+        var left = x - halfW
+        var right = x + halfW
+        var top = y - halfH
+        var bottom = y + halfH
+        // Shifted rather than squashed when it runs off an edge: a region that
+        // silently shrank would cost travel, which is the one thing it exists
+        // to provide.
+        if (left < 0f) { right -= left; left = 0f }
+        if (right > 1f) { left -= right - 1f; right = 1f }
+        if (top < 0f) { bottom -= top; top = 0f }
+        if (bottom > 1f) { top -= bottom - 1f; bottom = 1f }
+        return AimSettings.Region(
+            left.coerceIn(0f, 1f), top.coerceIn(0f, 1f),
+            right.coerceIn(0f, 1f), bottom.coerceIn(0f, 1f),
+        )
+    }
 
     fun toJson(): JSONObject = JSONObject().apply {
         put("id", id)
@@ -48,6 +96,10 @@ data class Control(
         put("x", x.toDouble())
         put("y", y.toDouble())
         put("press", press.name)
+        put("kind", kind.name)
+        stick?.let { put("stick", it.name) }
+        put("width", width.toDouble())
+        put("height", height.toDouble())
     }
 
     companion object {
@@ -62,6 +114,15 @@ data class Control(
                 press = runCatching {
                     Press.valueOf(json.optString("press", "TAP"))
                 }.getOrDefault(Press.TAP),
+                kind = runCatching {
+                    Kind.valueOf(json.optString("kind", "BUTTON"))
+                }.getOrDefault(Kind.BUTTON),
+                stick = runCatching {
+                    json.optString("stick").takeIf { it.isNotEmpty() }
+                        ?.let { Stick.valueOf(it) }
+                }.getOrNull(),
+                width = json.optDouble("width", 1.0).toFloat().coerceIn(0.1f, 1f),
+                height = json.optDouble("height", 1.0).toFloat().coerceIn(0.1f, 1f),
             )
         }
     }
@@ -79,7 +140,12 @@ data class Layout(val controls: List<Control> = emptyList()) {
      * way to tell from the screen which one you meant.
      */
     fun forKey(keyCode: Int): Control? =
-        controls.firstOrNull { it.keyCode == keyCode && it.bound }
+        controls.firstOrNull { !it.isStick && it.keyCode == keyCode && it.bound }
+
+    /** Every stick control that is actually bound to a stick. */
+    fun sticks(): List<Control> = controls.filter { it.isStick && it.bound }
+
+    val usesSticks: Boolean get() = controls.any { it.isStick }
 
     fun add(control: Control): Layout = Layout(controls + control)
 
@@ -95,13 +161,27 @@ data class Layout(val controls: List<Control> = emptyList()) {
      * an error message about a conflict you cannot see is worse than moving it.
      * The control it came from is left unbound and says so on screen.
      */
+    /** Puts [stick] on [id], taking it off whatever had it, for the same reason. */
+    fun bindStick(id: String, stick: Stick): Layout {
+        if (this[id] == null) return this
+        return Layout(
+            controls.map {
+                when {
+                    it.id == id -> it.copy(stick = stick, kind = Kind.STICK)
+                    it.isStick && it.stick == stick -> it.copy(stick = null)
+                    else -> it
+                }
+            }
+        )
+    }
+
     fun bind(id: String, keyCode: Int): Layout {
         if (this[id] == null) return this
         return Layout(
             controls.map {
                 when {
                     it.id == id -> it.copy(keyCode = keyCode)
-                    it.keyCode == keyCode -> it.copy(keyCode = 0)
+                    !it.isStick && it.keyCode == keyCode -> it.copy(keyCode = 0)
                     else -> it
                 }
             }

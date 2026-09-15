@@ -109,4 +109,100 @@ class LayoutTest {
         repeat(8) { layout = layout.add(control(Layout.nextId(layout))) }
         assertEquals(8, layout.controls.map { it.id }.toSet().size)
     }
+
+    // ---------------------------------------------------------------- sticks
+
+    private fun stick(id: String, s: Stick? = null, x: Float = 0.5f, y: Float = 0.5f) =
+        Control(id = id, label = id, keyCode = 0, x = x, y = y,
+            kind = Kind.STICK, stick = s)
+
+    @Test fun `a stick control is bound by a stick, not a key`() {
+        val layout = Layout().add(stick("aim", Stick.RIGHT))
+        assertTrue(layout["aim"]!!.bound)
+        assertEquals(1, layout.sticks().size)
+    }
+
+    @Test fun `an unassigned stick control is not bound`() {
+        assertFalse(Layout().add(stick("aim"))["aim"]!!.bound)
+        assertEquals(0, Layout().add(stick("aim")).sticks().size)
+    }
+
+    @Test fun `binding a stick takes it off whatever had it`() {
+        // Two controls on one stick would drag two fingers from one thumb.
+        var layout = Layout().add(stick("aim", Stick.RIGHT)).add(stick("move"))
+        layout = layout.bindStick("move", Stick.RIGHT)
+
+        assertEquals(Stick.RIGHT, layout["move"]!!.stick)
+        assertNull("the old owner is released", layout["aim"]!!.stick)
+        assertEquals(1, layout.sticks().size)
+    }
+
+    @Test fun `a stick control is never fired by a key`() {
+        // Its keyCode field is meaningless; matching on it would make a stick
+        // fire a tap every time that button was pressed.
+        val layout = Layout().add(
+            Control("aim", "aim", 96, 0.5f, 0.5f, kind = Kind.STICK, stick = Stick.RIGHT)
+        )
+        assertNull(layout.forKey(96))
+    }
+
+    @Test fun `binding a key does not disturb a stick that shares the number`() {
+        var layout = Layout()
+            .add(Control("aim", "aim", 96, 0.5f, 0.5f, kind = Kind.STICK, stick = Stick.RIGHT))
+            .add(control("fire"))
+
+        layout = layout.bind("fire", 96)
+
+        assertEquals(Stick.RIGHT, layout["aim"]!!.stick)
+        assertEquals("fire", layout.forKey(96)?.id)
+    }
+
+    // ---------------------------------------------------------------- region
+
+    @Test fun `a full-size region is the whole screen`() {
+        val region = stick("aim", Stick.RIGHT).region()
+        assertEquals(0f, region.left, 0.001f)
+        assertEquals(1f, region.right, 0.001f)
+        assertEquals(0f, region.top, 0.001f)
+        assertEquals(1f, region.bottom, 0.001f)
+    }
+
+    @Test fun `a region near an edge is shifted, not squashed`() {
+        // Squashing would quietly cost travel, which is the one thing a region
+        // exists to provide.
+        val control = stick("aim", Stick.RIGHT, x = 0.05f, y = 0.5f)
+            .copy(width = 0.5f, height = 0.5f)
+        val region = control.region()
+
+        assertEquals(0f, region.left, 0.001f)
+        assertEquals(0.5f, region.right - region.left, 0.001f)
+    }
+
+    @Test fun `a region is never wider than the screen`() {
+        val control = stick("aim", Stick.RIGHT).copy(width = 1f, height = 1f)
+        val region = control.region()
+        assertTrue(region.right - region.left <= 1.001f)
+        assertTrue(region.bottom - region.top <= 1.001f)
+    }
+
+    @Test fun `a stick survives being saved and loaded`() {
+        val layout = Layout().add(
+            stick("aim", Stick.RIGHT, x = 0.4f, y = 0.6f).copy(width = 0.8f)
+        )
+        val restored = Layout.fromJson(layout.toJson())["aim"]!!
+
+        assertEquals(Kind.STICK, restored.kind)
+        assertEquals(Stick.RIGHT, restored.stick)
+        assertEquals(0.8f, restored.width, 0.001f)
+    }
+
+    @Test fun `a layout from before sticks existed still loads as buttons`() {
+        // Written by an earlier version: no kind, no stick, no size.
+        val json = """[{"id":"fire","label":"fire","keyCode":96,"x":0.8,"y":0.6}]"""
+        val control = Layout.fromJson(json)["fire"]!!
+
+        assertEquals(Kind.BUTTON, control.kind)
+        assertTrue(control.bound)
+        assertEquals(1f, control.width, 0.001f)
+    }
 }

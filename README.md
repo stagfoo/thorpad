@@ -34,9 +34,15 @@ because the API has no "press and stay pressed".
 
 1. Settings → Accessibility → **thorpad** → on.
 2. Allow **draw over other apps**.
-3. **Show**, then **Add a control**, then **Bind** and press the button you want.
-4. **Edit** to drag controls where you want them; **Play** to make the overlay
-   invisible to touch so your fingers reach the game.
+3. **Show**, then **Add a button**, then **Bind** and press the button you want.
+4. **Edit** to drag controls where you want them, then **DONE** on the overlay
+   itself.
+
+**Buttons do not reach the game while editing**, and that is not a bug you can
+guess: in edit mode the overlay has to accept touches so controls can be
+dragged, which means it also catches the taps meant for the game. Edit mode now
+says so across the top and carries its own DONE button, so you never have to go
+back to the app to leave it.
 
 ## It shows its own working
 
@@ -70,13 +76,20 @@ one button cannot drive two controls, a control cannot be dragged off screen, a
 sweep covers most of the screen before it hitches — are tested without a device.
 30 tests.
 
-## Not wired up yet: stick aiming
+## Sticks
 
-`AimEngine.kt` is here and tested, but nothing calls it. It turns stick
-deflection into a dragged finger, which is what a game like NIKKE actually reads
-for aiming — there is no button to bind, only a drag.
+**Add a stick** makes a control that drags a finger around a region instead of
+tapping a point — which is what a game reads for aiming, since there is no
+button to bind for that. Bind it to the left or right stick; the dashed
+rectangle on the overlay is the area the finger will travel in.
 
-The thing it exists to solve is that a drag has an end: when the finger reaches
+**Android 14 or newer.** Analog sticks are motion events, not key events, and
+before 14 an accessibility service cannot see them at all — the only route was a
+window holding focus, which costs the back button. From 14 the system hands them
+over with no window and no focus. The setup screen says which route is in use
+and counts the stick events arriving, so this is visible rather than silent.
+
+The thing sticks exist to solve is that a drag has an end: when the finger reaches
 the edge of its region it must lift, jump back and press again, and that hitch
 is what you feel on a long sweep. Two settings decide how often it happens:
 

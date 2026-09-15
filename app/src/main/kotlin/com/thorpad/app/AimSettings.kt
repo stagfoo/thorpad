@@ -42,4 +42,19 @@ data class AimSettings(
     val holdMs: Int = 220,
 
     val pollHz: Int = 120,
-)
+) {
+    /** A stick's patch of screen, as fractions of it. */
+    data class Region(
+        val left: Float,
+        val top: Float,
+        val right: Float,
+        val bottom: Float,
+    )
+
+    fun within(region: Region): AimSettings = copy(
+        regionLeft = region.left,
+        regionTop = region.top,
+        regionRight = region.right,
+        regionBottom = region.bottom,
+    )
+}

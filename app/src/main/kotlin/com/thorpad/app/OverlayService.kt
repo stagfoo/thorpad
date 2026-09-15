@@ -147,6 +147,7 @@ class OverlayService : Service() {
             layout = store.load()
             onMoved = ::moveControl
             onPicked = { id -> selectedId = id }
+            onDone = { setMode(editing = false) }
         }
         target.editing = editing
 
@@ -200,6 +201,7 @@ class OverlayService : Service() {
     private fun teardown() {
         TapService.instance?.releaseEverything()
         holding.clear()
+        aim.clear()
         val wm = manager
         val target = view
         view = null
@@ -266,6 +268,100 @@ class OverlayService : Service() {
             }
         }
         return true
+    }
+
+    // ------------------------------------------------------------- sticks
+
+    private val aim = mutableMapOf<String, AimEngine>()
+    private var lastTick = 0L
+
+    @Volatile var motionSeen: Int = 0
+        private set
+    @Volatile var lastStick: String = "—"
+        private set
+
+    var settings: AimSettings = AimSettings()
+
+    /**
+     * A stick moved. Runs every bound stick control and drags its finger.
+     *
+     * Paced by the events themselves rather than by a timer: a pad reports
+     * while it is being moved and goes quiet when it is not, which is exactly
+     * when there is and is not work to do.
+     */
+    fun onMotion(event: android.view.MotionEvent) {
+        val source = event.source
+        val fromPad =
+            source and android.view.InputDevice.SOURCE_JOYSTICK != 0 ||
+                source and android.view.InputDevice.SOURCE_GAMEPAD != 0
+        if (!fromPad) return
+
+        val sticks = layout.sticks()
+        if (sticks.isEmpty()) return
+
+        motionSeen++
+
+        val bounds = view ?: return
+        val width = bounds.width.toFloat()
+        val height = bounds.height.toFloat()
+        if (width <= 0f || height <= 0f) return
+
+        val now = android.os.SystemClock.uptimeMillis()
+        var dt = (now - lastTick) / 1000f
+        lastTick = now
+        // A first event, or one after a long quiet spell, must not teleport the
+        // finger across the screen.
+        if (dt <= 0f || dt > 0.25f) dt = 0.016f
+
+        val tapper = TapService.instance ?: return
+
+        for (control in sticks) {
+            val which = control.stick ?: continue
+            val sx: Float
+            val sy: Float
+            if (which == Stick.LEFT) {
+                sx = event.getAxisValue(android.view.MotionEvent.AXIS_X)
+                sy = event.getAxisValue(android.view.MotionEvent.AXIS_Y)
+            } else {
+                // Pads disagree about where the right stick lives. Whichever
+                // pair is actually moving is the one that is it.
+                val rx = event.getAxisValue(android.view.MotionEvent.AXIS_RX)
+                val ry = event.getAxisValue(android.view.MotionEvent.AXIS_RY)
+                val z = event.getAxisValue(android.view.MotionEvent.AXIS_Z)
+                val rz = event.getAxisValue(android.view.MotionEvent.AXIS_RZ)
+                val useZ = (kotlin.math.abs(z) + kotlin.math.abs(rz)) >
+                    (kotlin.math.abs(rx) + kotlin.math.abs(ry))
+                sx = if (useZ) z else rx
+                sy = if (useZ) rz else ry
+            }
+
+            lastStick = "%s %+.2f,%+.2f".format(which.name.lowercase(), sx, sy)
+
+            val engine = aim.getOrPut(control.id) {
+                AimEngine(settings.within(control.region()))
+            }
+            engine.reconfigure(settings.within(control.region()))
+
+            val step = engine.step(sx, sy, dt, now)
+            val px = step.x * width
+            val py = step.y * height
+
+            when (step.action) {
+                AimEngine.Action.PRESS -> {
+                    view?.flash(control.id)
+                    tapper.startDrag(control.id, px, py)
+                }
+                AimEngine.Action.MOVE -> tapper.dragTo(control.id, px, py)
+                AimEngine.Action.LIFT -> tapper.releaseHold(control.id)
+                AimEngine.Action.RESTART -> {
+                    // Out of screen to drag across: lift, go back to the far
+                    // side and press again. The hitch you feel on a long sweep.
+                    tapper.releaseHold(control.id)
+                    tapper.startDrag(control.id, px, py)
+                }
+                AimEngine.Action.NONE -> Unit
+            }
+        }
     }
 
     private fun isFromPad(event: KeyEvent): Boolean {
