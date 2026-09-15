@@ -32,6 +32,21 @@ class OverlayView(context: Context) : View(context) {
             invalidate()
         }
 
+    /**
+     * Whether the control markers are drawn.
+     *
+     * Separate from the crosshair on purpose. The markers are a reference —
+     * useful while learning a layout, clutter over a game once you know it —
+     * but the crosshair is the aim itself, and hiding that would be hiding the
+     * thing you are looking at. Controls keep working either way; this is only
+     * about what is painted.
+     */
+    var showMarkers: Boolean = true
+        set(value) {
+            field = value
+            invalidate()
+        }
+
     /** The control being configured, drawn picked out from the rest. */
     var selectedId: String? = null
         set(value) {
@@ -133,9 +148,12 @@ class OverlayView(context: Context) : View(context) {
         val now = SystemClock.uptimeMillis()
         var animating = false
 
+        val paintMarkers = showMarkers || editing
+
         // A stick's region first and underneath, so it reads as the area the
         // finger will travel in rather than as another control.
         for (control in layout.controls) {
+            if (!paintMarkers) break
             if (!control.isStick) continue
             val box = control.region()
             region.color = if (control.bound) {
@@ -168,12 +186,16 @@ class OverlayView(context: Context) : View(context) {
 
             // Faint while playing, solid while editing: in a game these sit on
             // top of the art and you want to see through them, but while
-            // placing them you want to see them.
+            // placing them you want to see them. With markers turned off only
+            // the flash is drawn — a press still has to show, or a button that
+            // does nothing looks the same as one that is not bound.
             val alpha = when {
                 lit -> 220
+                !paintMarkers -> 0
                 editing -> 200
                 else -> 70
             }
+            if (alpha == 0) continue
 
             fill.color = base
             fill.alpha = alpha / 4
@@ -216,6 +238,30 @@ class OverlayView(context: Context) : View(context) {
             canvas.drawLine(cx + arm * 0.3f, cy, cx + arm, cy, cross)
             canvas.drawLine(cx, cy - arm, cx, cy - arm * 0.3f, cross)
             canvas.drawLine(cx, cy + arm * 0.3f, cx, cy + arm, cross)
+        }
+
+        if (!editing) {
+            // A badge that is always there, because the one question this has
+            // to answer at a glance is whether the controls are live. Without
+            // it, editing and playing look nearly identical from across a
+            // game, and a button that does nothing is indistinguishable from a
+            // button that is not bound.
+            val pill = android.graphics.RectF(20f, 20f, 132f, 66f)
+            fill.color = Color.parseColor("#7FD7A3")
+            fill.alpha = 45
+            canvas.drawRoundRect(pill, 23f, 23f, fill)
+            ring.color = Color.parseColor("#7FD7A3")
+            ring.alpha = 150
+            canvas.drawRoundRect(pill, 23f, 23f, ring)
+
+            fill.color = Color.parseColor("#7FD7A3")
+            fill.alpha = 230
+            canvas.drawCircle(pill.left + 26f, pill.centerY(), 7f, fill)
+
+            small.alpha = 230
+            small.textAlign = Paint.Align.LEFT
+            canvas.drawText("LIVE", pill.left + 42f, pill.centerY() + 7f, small)
+            small.textAlign = Paint.Align.CENTER
         }
 
         if (editing) {

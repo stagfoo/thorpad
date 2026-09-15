@@ -34,13 +34,30 @@ because the API has no "press and stay pressed".
 
 1. Settings → Accessibility → **thorpad** → on.
 2. Allow **draw over other apps**.
-3. **Show**, then add a button or a stick.
-4. **Edit**, then on the overlay: **tap a control and press the gamepad button
-   you want** to bind it, drag it to move it, and **DONE** when finished.
+3. **START CONTROLS**, then add a button or a stick.
+4. Tap the big button to flip between **LIVE** and **EDITING**. While editing,
+   on the overlay: tap a control and press the gamepad button you want to bind
+   it, drag it to move it, **DONE** when finished.
 
 Binding happens on the overlay rather than in the app, because the controls are
 placed over the game — that is where you are looking when you decide what a
 button should do.
+
+### There are two states and it always says which
+
+Editing and live look nearly identical from across a game, and in editing the
+overlay has to accept touches so controls can be dragged — which means it also
+catches the taps meant for the game. A button that does nothing then looks
+exactly like a button that is not bound.
+
+So the state is said three times over: the app's one button carries it, the
+notification carries it (and can flip it without leaving the game), and the
+overlay itself shows a small **LIVE** badge or a full editing banner.
+
+**Markers** hides the control circles and keeps the crosshair, because the
+crosshair is the thing you are actually looking at while aiming and the circles
+are only a reference. Buttons keep working either way, and a press still flashes
+so it is visible that it landed.
 
 **Buttons do not reach the game while editing**, and that is not a bug you can
 guess: in edit mode the overlay has to accept touches so controls can be

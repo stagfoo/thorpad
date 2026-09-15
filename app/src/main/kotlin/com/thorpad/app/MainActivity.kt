@@ -31,6 +31,7 @@ class MainActivity : Activity() {
     private lateinit var status: TextView
     private lateinit var controls: LinearLayout
     private lateinit var hint: TextView
+    private lateinit var mode: Button
 
     private val ticker = Handler(Looper.getMainLooper())
     private val store by lazy { Store(this) }
@@ -119,17 +120,34 @@ class MainActivity : Activity() {
 
         root.addView(section("2 — controls"))
 
+        // One state, one control. Four buttons for a two-state toggle was how
+        // you ended up in edit mode without knowing it, wondering why nothing
+        // reached the game.
+        mode = wide("") { flipMode() }
+        root.addView(mode)
+        root.addView(
+            note(
+                "Editing makes the overlay draggable — which means it also " +
+                    "catches the taps meant for the game, so nothing gets " +
+                    "through until you go back to live."
+            )
+        )
+
         val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        row.addView(button("Show") { OverlayService.send(this, OverlayService.ACTION_START) })
-        row.addView(button("Edit") { OverlayService.send(this, OverlayService.ACTION_EDIT) })
-        row.addView(button("Play") { OverlayService.send(this, OverlayService.ACTION_PLAY) })
-        row.addView(button("Hide") { OverlayService.send(this, OverlayService.ACTION_STOP) })
+        row.addView(button("Markers") {
+            OverlayService.send(this, OverlayService.ACTION_MARKERS)
+            refresh()
+        })
+        row.addView(button("Stop controls") {
+            OverlayService.send(this, OverlayService.ACTION_STOP)
+            refresh()
+        })
         root.addView(row)
         root.addView(
             note(
-                "Edit makes the overlay draggable. Play makes it invisible to " +
-                    "touch so the game gets your fingers, while still catching " +
-                    "the gamepad."
+                "Markers hides the control circles and leaves the crosshair, " +
+                    "since the crosshair is the thing you are actually looking " +
+                    "at. Buttons keep working either way."
             )
         )
 
@@ -171,17 +189,49 @@ class MainActivity : Activity() {
         return ScrollView(this).apply { addView(root) }
     }
 
+    /** Start it, or flip between editing and live. */
+    private fun flipMode() {
+        val running = service
+        if (running == null || !running.showing) {
+            OverlayService.send(this, OverlayService.ACTION_START)
+        } else {
+            OverlayService.send(this, OverlayService.ACTION_TOGGLE)
+        }
+        mode.postDelayed({ refresh() }, 120)
+    }
+
     private fun refresh() {
         val canTap = TapService.isEnabled(this)
         val canDraw = OverlayService.canDraw(this)
         val showing = service?.showing == true
+        val editing = service?.editing == true
+
+        mode.text = when {
+            !showing -> "START CONTROLS"
+            editing -> "EDITING  —  tap to go live"
+            else -> "● LIVE  —  tap to edit"
+        }
+        mode.setBackgroundColor(
+            when {
+                !showing -> Color.parseColor("#2A3038")
+                editing -> Color.parseColor("#6A5A18")
+                else -> Color.parseColor("#1F4A33")
+            }
+        )
+        mode.setTextColor(
+            when {
+                !showing -> Color.parseColor("#C8D4DE")
+                editing -> Color.parseColor("#FFD54A")
+                else -> Color.parseColor("#9BE28B")
+            }
+        )
 
         status.text = when {
             !canTap -> "Accessibility is off — thorpad cannot tap the screen."
             !canDraw -> "Draw over other apps is off — no controls, and no gamepad."
-            !showing -> "Ready. Press Show."
-            service?.editing == true -> "Editing. Drag the controls where you want them."
-            else -> "Playing. Buttons tap; your fingers go to the game."
+            !showing -> "Ready."
+            editing -> "Editing. Tap a control, then press a gamepad button to bind it."
+            else -> "Live. Buttons tap the game; your fingers reach it too."
         }
         status.setTextColor(
             when {
@@ -196,7 +246,14 @@ class MainActivity : Activity() {
             append("Android ${Build.VERSION.SDK_INT} · ")
             append("accessibility ").append(if (canTap) "on" else "OFF")
             append(" · overlay ").append(if (canDraw) "allowed" else "BLOCKED")
-            append(" · window ").append(if (showing) "up" else "down")
+            append(" · window ").append(
+                when {
+                    !showing -> "down"
+                    editing -> "EDITING"
+                    else -> "live"
+                }
+            )
+            append(" · markers ").append(if (service?.markers != false) "on" else "off")
             append("\ngamepad keys seen: ${service?.keysSeen ?: 0}")
             service?.lastKey?.takeIf { it != 0 }?.let {
                 append(" (last ${Buttons.nameOf(it)})")

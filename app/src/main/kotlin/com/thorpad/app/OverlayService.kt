@@ -38,6 +38,12 @@ class OverlayService : Service() {
         const val ACTION_EDIT = "edit"
         const val ACTION_PLAY = "play"
 
+        /** Flips between editing and playing, which is all the two modes are. */
+        const val ACTION_TOGGLE = "toggle"
+
+        /** Show or hide the control markers, without touching the crosshair. */
+        const val ACTION_MARKERS = "markers"
+
         private const val CHANNEL = "thorpad"
         private const val NOTIFICATION = 1
 
@@ -61,6 +67,16 @@ class OverlayService : Service() {
     private val holding = mutableMapOf<Int, String>()
 
     @Volatile var editing = false
+        private set
+
+    /**
+     * Whether the control markers are painted.
+     *
+     * Not the same as the overlay being up, and deliberately not the same as
+     * the crosshair: the markers are a reference you stop needing once you know
+     * the layout, while the crosshair is the aim itself.
+     */
+    @Volatile var markers = true
         private set
 
     @Volatile var lastKey: Int = 0
@@ -92,6 +108,12 @@ class OverlayService : Service() {
             }
             ACTION_EDIT -> setMode(editing = true)
             ACTION_PLAY -> setMode(editing = false)
+            ACTION_TOGGLE -> setMode(editing = !editing)
+            ACTION_MARKERS -> {
+                markers = !markers
+                view?.showMarkers = markers
+                refreshNotification()
+            }
             else -> {
                 startForeground(NOTIFICATION, notification())
                 setMode(editing = false)
@@ -138,6 +160,9 @@ class OverlayService : Service() {
     private fun setMode(editing: Boolean) {
         this.editing = editing
         if (!canDraw(this)) return
+        // The notification is the only thing visible from inside a game, so it
+        // has to carry the mode rather than a fixed label.
+        refreshNotification()
 
         val wm = manager ?: (getSystemService(Context.WINDOW_SERVICE) as? WindowManager)
             ?: return
@@ -146,6 +171,7 @@ class OverlayService : Service() {
         val existing = view
         val target = existing ?: OverlayView(this).apply {
             layout = store.load()
+            showMarkers = markers
             onMotion = { event -> this@OverlayService.onMotion(event) }
             onKey = { event -> this@OverlayService.onFocusedKey(event) }
             onMoved = ::moveControl
@@ -464,6 +490,15 @@ class OverlayService : Service() {
 
     // ------------------------------------------------------------ housekeeping
 
+    private fun refreshNotification() {
+        val manager = getSystemService(NotificationManager::class.java) ?: return
+        try {
+            manager.notify(NOTIFICATION, notification())
+        } catch (e: Throwable) {
+            // Not in the foreground yet; the first startForeground carries it.
+        }
+    }
+
     private fun notification(): Notification {
         val manager = getSystemService(NotificationManager::class.java)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -478,21 +513,32 @@ class OverlayService : Service() {
             Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_IMMUTABLE,
         )
-        val stop = PendingIntent.getService(
-            this, 1,
-            Intent(this, OverlayService::class.java).setAction(ACTION_STOP),
-            PendingIntent.FLAG_IMMUTABLE,
-        )
+        fun action(label: String, what: String, code: Int) =
+            Notification.Action.Builder(
+                null as android.graphics.drawable.Icon?,
+                label,
+                PendingIntent.getService(
+                    this, code,
+                    Intent(this, OverlayService::class.java).setAction(what),
+                    PendingIntent.FLAG_IMMUTABLE,
+                ),
+            ).build()
 
         return Notification.Builder(this, CHANNEL)
-            .setContentTitle("thorpad controls are on")
-            .setContentText("Tap to edit, or stop them here.")
+            .setContentTitle(if (editing) "thorpad — EDITING" else "thorpad — live")
+            .setContentText(
+                if (editing) {
+                    "Buttons won't reach the game while editing."
+                } else {
+                    "Buttons are tapping the game."
+                }
+            )
             .setSmallIcon(android.R.drawable.ic_menu_compass)
             .setContentIntent(open)
-            .addAction(
-                Notification.Action.Builder(null as android.graphics.drawable.Icon?, "Stop", stop)
-                    .build()
-            )
+            // From inside a game this is the only way to flip modes without
+            // leaving it, which is most of when you want to.
+            .addAction(action(if (editing) "Play" else "Edit", ACTION_TOGGLE, 1))
+            .addAction(action("Stop", ACTION_STOP, 2))
             .setOngoing(true)
             .build()
     }
