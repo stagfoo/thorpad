@@ -60,12 +60,36 @@ OverlayView.kt      draws the controls, drags them in edit mode
 MainActivity.kt     permissions, adding and binding
 ```
 
-`Layout` has no Android types in it, so the rules — one button cannot drive two
-controls, a control cannot be dragged off screen, a layout survives being saved
-— are tested without a device.
+```
+AimEngine.kt        stick to dragged finger — written and tested, not yet wired
+AimSettings.kt      the numbers behind it
+```
 
-## Not yet
+Neither `Layout` nor `AimEngine` has any Android types in it, so the rules —
+one button cannot drive two controls, a control cannot be dragged off screen, a
+sweep covers most of the screen before it hitches — are tested without a device.
+30 tests.
 
-Stick-to-drag aiming. The maths for it is written and measured (in the sibling
-`thoraim` repo) but this deliberately starts with the part that is simple enough
-to verify, because the last three attempts did not get that far.
+## Not wired up yet: stick aiming
+
+`AimEngine.kt` is here and tested, but nothing calls it. It turns stick
+deflection into a dragged finger, which is what a game like NIKKE actually reads
+for aiming — there is no button to bind, only a drag.
+
+The thing it exists to solve is that a drag has an end: when the finger reaches
+the edge of its region it must lift, jump back and press again, and that hitch
+is what you feel on a long sweep. Two settings decide how often it happens:
+
+| region | stroke starts | longest stroke | hitches per 3s sweep |
+|---|---|---|---|
+| full screen | far edge | **0.880 screens** | 7 |
+| full screen | centre | 0.477 | 13 |
+| 40% box | centre | 0.165 | 35 |
+
+Measured, not guessed — `AimEngineTest."travel table"` prints exactly that, so
+it cannot drift from the code. Starting each stroke against the *far* side of
+the region, facing the way the stick points, is worth as much as making the
+region bigger.
+
+It is deliberately not switched on. Buttons are the part simple enough to
+verify, and three previous attempts failed by stacking unverified layers.
