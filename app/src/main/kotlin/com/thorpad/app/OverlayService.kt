@@ -12,6 +12,7 @@ import android.os.Build
 import android.os.IBinder
 import android.provider.Settings
 import android.view.Gravity
+import android.accessibilityservice.AccessibilityService
 import android.view.KeyEvent
 import android.view.View
 import android.view.WindowManager
@@ -145,8 +146,17 @@ class OverlayService : Service() {
         val existing = view
         val target = existing ?: OverlayView(this).apply {
             layout = store.load()
+            onMotion = { event -> this@OverlayService.onMotion(event) }
+            onKey = { event -> this@OverlayService.onFocusedKey(event) }
             onMoved = ::moveControl
-            onPicked = { id -> selectedId = id }
+            onPicked = { id ->
+                selectedId = id
+                // Picking a control in edit mode arms it: the next gamepad
+                // button pressed binds to it. All the editing happens here,
+                // over the game, so going back to the app to bind was the
+                // wrong way round.
+                this@OverlayService.learningFor = id
+            }
             onDone = { setMode(editing = false) }
         }
         target.editing = editing
@@ -171,11 +181,14 @@ class OverlayService : Service() {
         var flags = WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS or
             WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
 
-        // Never focusable, in either mode: buttons come through the
-        // accessibility key hook, so this window has no reason to take focus
-        // from the game — and a focused overlay would also swallow back and
-        // volume with nowhere to forward them.
-        flags = flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+        // Focus is taken only when it buys something: below Android 14 a
+        // focused window is the one thing that can see an analog stick, so a
+        // stick control cannot work without it. Otherwise buttons arrive
+        // through the accessibility key hook and there is no reason to take
+        // focus off the game at all.
+        if (!needsFocus()) {
+            flags = flags or WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+        }
 
         if (!editing) {
             // Playing: every touch passes straight through to the game.
@@ -198,10 +211,55 @@ class OverlayService : Service() {
         }
     }
 
+    /** Whether a focused window is currently the only way to read the sticks. */
+    fun needsFocus(): Boolean =
+        Build.VERSION.SDK_INT < 34 && layout.usesSticks && focusAllowed
+
+    /** Turned on by the user, because it is a trade rather than a free win. */
+    var focusAllowed: Boolean = true
+
+    /**
+     * A key that arrived because this window holds focus.
+     *
+     * The cost of focus is that *everything* comes here, including keys the
+     * game was meant to get. Rather than swallowing them, the ones that have a
+     * system equivalent are performed outright — which is almost all of the
+     * ones that matter.
+     */
+    private fun onFocusedKey(event: KeyEvent): Boolean {
+        if (isFromPad(event)) return onKey(event)
+        if (event.action != KeyEvent.ACTION_DOWN) return true
+
+        val tapper = TapService.instance
+        when (event.keyCode) {
+            KeyEvent.KEYCODE_BACK ->
+                tapper?.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK)
+            KeyEvent.KEYCODE_HOME ->
+                tapper?.performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME)
+            KeyEvent.KEYCODE_APP_SWITCH ->
+                tapper?.performGlobalAction(AccessibilityService.GLOBAL_ACTION_RECENTS)
+            KeyEvent.KEYCODE_VOLUME_UP -> adjustVolume(1)
+            KeyEvent.KEYCODE_VOLUME_DOWN -> adjustVolume(-1)
+            else -> return true
+        }
+        return true
+    }
+
+    private fun adjustVolume(direction: Int) {
+        val audio = getSystemService(android.media.AudioManager::class.java) ?: return
+        audio.adjustStreamVolume(
+            android.media.AudioManager.STREAM_MUSIC,
+            if (direction > 0) android.media.AudioManager.ADJUST_RAISE
+            else android.media.AudioManager.ADJUST_LOWER,
+            android.media.AudioManager.FLAG_SHOW_UI,
+        )
+    }
+
     private fun teardown() {
         TapService.instance?.releaseEverything()
         holding.clear()
         aim.clear()
+        cursors.clear()
         val wm = manager
         val target = view
         view = null
@@ -230,9 +288,15 @@ class OverlayService : Service() {
         keysSeen++
         lastKey = event.keyCode
 
+        // While a control is picked in edit mode, the next button pressed binds
+        // to it. Editing happens on the overlay, over the game, so having to go
+        // back to the app to bind was the wrong way round.
         val learning = learningFor
         if (learning != null && event.action == KeyEvent.ACTION_DOWN) {
             learningFor = null
+            val bound = layout.bind(learning, event.keyCode)
+            update(bound)
+            view?.flash(learning)
             onLearned?.invoke(learning, event.keyCode)
             return true
         }
@@ -245,8 +309,11 @@ class OverlayService : Service() {
         val height = (bounds?.height ?: 0).toFloat()
         if (width <= 0f || height <= 0f) return false
 
-        val x = control.x * width
-        val y = control.y * height
+        // A button set to fire at the crosshair aims there instead of at its
+        // own spot, which is the only thing that makes a cursor do anything.
+        val spot = if (control.atCursor) cursorSpot() else null
+        val x = (spot?.first ?: control.x) * width
+        val y = (spot?.second ?: control.y) * height
 
         when (event.action) {
             KeyEvent.ACTION_DOWN -> {
@@ -273,6 +340,7 @@ class OverlayService : Service() {
     // ------------------------------------------------------------- sticks
 
     private val aim = mutableMapOf<String, AimEngine>()
+    private val cursors = mutableMapOf<String, CursorEngine>()
     private var lastTick = 0L
 
     @Volatile var motionSeen: Int = 0
@@ -337,10 +405,26 @@ class OverlayService : Service() {
 
             lastStick = "%s %+.2f,%+.2f".format(which.name.lowercase(), sx, sy)
 
-            val engine = aim.getOrPut(control.id) {
-                AimEngine(settings.within(control.region()))
+            val tuned = settings.within(control.region())
+
+            if (control.isCursor) {
+                // Nothing is injected here at all. The crosshair moves, and a
+                // button firing "at cursor" is what eventually touches the
+                // screen — which is the whole point of this kind.
+                val cursor = cursors.getOrPut(control.id) {
+                    CursorEngine(tuned).apply { centre() }
+                }
+                cursor.reconfigure(tuned)
+                if (cursor.step(sx, sy, dt)) {
+                    view?.showCursor(cursor.x, cursor.y)
+                }
+                continue
             }
-            engine.reconfigure(settings.within(control.region()))
+
+            val engine = aim.getOrPut(control.id) {
+                AimEngine(tuned)
+            }
+            engine.reconfigure(tuned)
 
             val step = engine.step(sx, sy, dt, now)
             val px = step.x * width
@@ -362,6 +446,13 @@ class OverlayService : Service() {
                 AimEngine.Action.NONE -> Unit
             }
         }
+    }
+
+    /** Where a button set to fire "at cursor" should aim, in fractions. */
+    private fun cursorSpot(): Pair<Float, Float>? {
+        val control = layout.cursor() ?: return null
+        val cursor = cursors[control.id] ?: return null
+        return cursor.x to cursor.y
     }
 
     private fun isFromPad(event: KeyEvent): Boolean {

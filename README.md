@@ -34,9 +34,13 @@ because the API has no "press and stay pressed".
 
 1. Settings → Accessibility → **thorpad** → on.
 2. Allow **draw over other apps**.
-3. **Show**, then **Add a button**, then **Bind** and press the button you want.
-4. **Edit** to drag controls where you want them, then **DONE** on the overlay
-   itself.
+3. **Show**, then add a button or a stick.
+4. **Edit**, then on the overlay: **tap a control and press the gamepad button
+   you want** to bind it, drag it to move it, and **DONE** when finished.
+
+Binding happens on the overlay rather than in the app, because the controls are
+placed over the game — that is where you are looking when you decide what a
+button should do.
 
 **Buttons do not reach the game while editing**, and that is not a bug you can
 guess: in edit mode the overlay has to accept touches so controls can be
@@ -76,18 +80,36 @@ one button cannot drive two controls, a control cannot be dragged off screen, a
 sweep covers most of the screen before it hitches — are tested without a device.
 30 tests.
 
-## Sticks
+## Two ways to use a stick
 
-**Add a stick** makes a control that drags a finger around a region instead of
-tapping a point — which is what a game reads for aiming, since there is no
-button to bind for that. Bind it to the left or right stick; the dashed
-rectangle on the overlay is the area the finger will travel in.
+Which one a game understands is not something that can be settled from outside
+it, so both are here.
 
-**Android 14 or newer.** Analog sticks are motion events, not key events, and
-before 14 an accessibility service cannot see them at all — the only route was a
-window holding focus, which costs the back button. From 14 the system hands them
-over with no window and no focus. The setup screen says which route is in use
-and counts the stick events arriving, so this is visible rather than silent.
+**Stick (drag)** pulls a finger around the screen, which is what a game that
+tracks a travelling touch reads for aiming. The dashed rectangle on the overlay
+is where the finger may go.
+
+**Stick (crosshair)** injects nothing at all. It moves a marker, and a button
+set to **✛ on** taps wherever that marker is. Far less to ask of a game — no
+stroke to run out of, no region edge, no recentring hitch — but it only helps if
+the game acts on a tap where you put it rather than on a finger travelling.
+
+### Reading a stick at all
+
+Analog axes are motion events, not key events, and the two arrive by completely
+different routes.
+
+On **Android 14 and up** an accessibility service can ask the system for motion
+events: no window, no focus, no cost.
+
+**Below 14** it cannot see them at all, and the only thing that can is a window
+holding focus. So the overlay takes focus, but only when a stick control exists
+— and because a focused overlay receives *every* key, back, home, recents and
+volume are performed outright rather than swallowed. It is still a trade, just a
+much smaller one than losing those buttons.
+
+The setup screen prints the Android version, which route is in use, and a live
+count of stick events arriving.
 
 The thing sticks exist to solve is that a drag has an end: when the finger reaches
 the edge of its region it must lift, jump back and press again, and that hitch

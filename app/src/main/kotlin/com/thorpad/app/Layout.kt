@@ -22,6 +22,15 @@ enum class Kind {
 
     /** A stick that drags a finger around a region. */
     STICK,
+
+    /**
+     * A stick that moves a crosshair, injecting nothing until a button fires.
+     *
+     * Much less to ask of a game than a drag — no stroke to run out of, no
+     * region edge, no recentring hitch — but it only helps if the game reads a
+     * tap where you put it rather than a finger travelling.
+     */
+    CURSOR,
 }
 
 /** Which stick drives a [Kind.STICK] control. */
@@ -47,6 +56,13 @@ data class Control(
     val kind: Kind = Kind.BUTTON,
     val stick: Stick? = null,
     /**
+     * For a button: fire at the crosshair rather than at its own spot.
+     *
+     * This is what makes a cursor useful — the stick puts the crosshair
+     * somewhere, and this button taps there.
+     */
+    val atCursor: Boolean = false,
+    /**
      * For a stick, how much of the screen the finger may drag across, as
      * fractions of it.
      *
@@ -62,7 +78,11 @@ data class Control(
         y = ny.coerceIn(0f, 1f),
     )
 
-    val isStick: Boolean get() = kind == Kind.STICK
+    val isStick: Boolean get() = kind == Kind.STICK || kind == Kind.CURSOR
+
+    val isCursor: Boolean get() = kind == Kind.CURSOR
+
+    val isButton: Boolean get() = kind == Kind.BUTTON
 
     /** A button needs a key; a stick needs a stick. */
     val bound: Boolean
@@ -98,6 +118,7 @@ data class Control(
         put("press", press.name)
         put("kind", kind.name)
         stick?.let { put("stick", it.name) }
+        put("atCursor", atCursor)
         put("width", width.toDouble())
         put("height", height.toDouble())
     }
@@ -121,6 +142,7 @@ data class Control(
                     json.optString("stick").takeIf { it.isNotEmpty() }
                         ?.let { Stick.valueOf(it) }
                 }.getOrNull(),
+                atCursor = json.optBoolean("atCursor", false),
                 width = json.optDouble("width", 1.0).toFloat().coerceIn(0.1f, 1f),
                 height = json.optDouble("height", 1.0).toFloat().coerceIn(0.1f, 1f),
             )
@@ -140,10 +162,13 @@ data class Layout(val controls: List<Control> = emptyList()) {
      * way to tell from the screen which one you meant.
      */
     fun forKey(keyCode: Int): Control? =
-        controls.firstOrNull { !it.isStick && it.keyCode == keyCode && it.bound }
+        controls.firstOrNull { it.isButton && it.keyCode == keyCode && it.bound }
 
-    /** Every stick control that is actually bound to a stick. */
+    /** Every stick or cursor control that is actually bound to a stick. */
     fun sticks(): List<Control> = controls.filter { it.isStick && it.bound }
+
+    /** The crosshair a button firing "at cursor" should aim at. */
+    fun cursor(): Control? = controls.firstOrNull { it.isCursor && it.bound }
 
     val usesSticks: Boolean get() = controls.any { it.isStick }
 
@@ -167,7 +192,13 @@ data class Layout(val controls: List<Control> = emptyList()) {
         return Layout(
             controls.map {
                 when {
-                    it.id == id -> it.copy(stick = stick, kind = Kind.STICK)
+                    // Keeps whichever stick kind it already was: changing a
+                    // crosshair into a drag because its stick was reassigned
+                    // would be a surprise.
+                    it.id == id -> it.copy(
+                        stick = stick,
+                        kind = if (it.isStick) it.kind else Kind.STICK,
+                    )
                     it.isStick && it.stick == stick -> it.copy(stick = null)
                     else -> it
                 }
@@ -181,7 +212,7 @@ data class Layout(val controls: List<Control> = emptyList()) {
             controls.map {
                 when {
                     it.id == id -> it.copy(keyCode = keyCode)
-                    !it.isStick && it.keyCode == keyCode -> it.copy(keyCode = 0)
+                    it.isButton && it.keyCode == keyCode -> it.copy(keyCode = 0)
                     else -> it
                 }
             }

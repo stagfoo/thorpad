@@ -134,14 +134,23 @@ class MainActivity : Activity() {
         )
 
         val adders = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
-        adders.addView(button("Add a button") { addControl() })
-        adders.addView(button("Add a stick") { addStick() })
+        adders.addView(button("Button") { addControl() })
+        adders.addView(button("Stick (drag)") { addStick(Kind.STICK) })
+        adders.addView(button("Stick (crosshair)") { addStick(Kind.CURSOR) })
         root.addView(adders)
         root.addView(
             note(
-                "A button taps one point. A stick drags a finger around a " +
-                    "region — which is what a game reads for aiming, since " +
-                    "there is no button to bind for that."
+                "A button taps one point. A drag stick pulls a finger around " +
+                    "the screen. A crosshair stick injects nothing at all — it " +
+                    "just moves a marker, and a button set to 'at crosshair' " +
+                    "taps wherever it is. Which one a game understands is worth " +
+                    "finding out rather than guessing."
+            )
+        )
+        root.addView(
+            note(
+                "Binding happens on the overlay now: press Edit, tap a " +
+                    "control, then press the gamepad button you want."
             )
         )
 
@@ -184,6 +193,7 @@ class MainActivity : Activity() {
 
         val tapper = TapService.instance
         hint.text = buildString {
+            append("Android ${Build.VERSION.SDK_INT} · ")
             append("accessibility ").append(if (canTap) "on" else "OFF")
             append(" · overlay ").append(if (canDraw) "allowed" else "BLOCKED")
             append(" · window ").append(if (showing) "up" else "down")
@@ -194,7 +204,14 @@ class MainActivity : Activity() {
             if (service?.layout?.usesSticks == true) {
                 append("\nstick events: ${service?.motionSeen ?: 0}")
                 append(" · ${service?.lastStick ?: "—"}")
-                append("\nstick source: ${tapper?.stickSource ?: "—"}")
+                append("\nstick source: ")
+            append(
+                if (Build.VERSION.SDK_INT >= 34) {
+                    tapper?.stickSource ?: "—"
+                } else {
+                    "focused overlay (Android ${Build.VERSION.SDK_INT})"
+                }
+            )
             }
             append("\ntaps sent: ${tapper?.sent ?: 0}")
             append(", completed: ${tapper?.completed ?: 0}")
@@ -237,10 +254,10 @@ class MainActivity : Activity() {
             })
 
             if (control.isStick) {
-                box.addView(button("Left") {
+                box.addView(button("L") {
                     update(layoutNow().bindStick(control.id, Stick.LEFT))
                 })
-                box.addView(button("Right") {
+                box.addView(button("R") {
                     update(layoutNow().bindStick(control.id, Stick.RIGHT))
                 })
             } else {
@@ -252,6 +269,11 @@ class MainActivity : Activity() {
                                 press = if (control.press == Press.HOLD) Press.TAP else Press.HOLD
                             )
                         )
+                    )
+                })
+                box.addView(button(if (control.atCursor) "✛ on" else "✛ off") {
+                    update(
+                        layoutNow().replace(control.copy(atCursor = !control.atCursor))
                     )
                 })
             }
@@ -299,32 +321,29 @@ class MainActivity : Activity() {
      * its region and has to lift and start again, so a smaller region only
      * means more of those hitches.
      */
-    private fun addStick() {
+    private fun addStick(kind: Kind) {
         val layout = layoutNow()
-        if (!stickSupport()) {
-            // Still added, so the layout can be built ready — but say plainly
-            // that nothing will drive it on this Android version.
-            status.text = "Sticks need Android 14 or newer. Added anyway, but " +
-                "it will not move until then."
-        }
         val taken = layout.sticks().mapNotNull { it.stick }.toSet()
         val free = Stick.entries.firstOrNull { it !in taken }
         update(
             layout.add(
                 Control(
                     id = Layout.nextId(layout),
-                    label = "aim",
+                    label = if (kind == Kind.CURSOR) "✛" else "aim",
                     keyCode = 0,
                     x = 0.5f,
                     y = 0.5f,
-                    kind = Kind.STICK,
+                    kind = kind,
                     stick = free ?: Stick.RIGHT,
                 )
             )
         )
+        if (Build.VERSION.SDK_INT < 34) {
+            status.text = "Below Android 14 the overlay has to hold focus to " +
+                "see a stick. Back, home and volume are forwarded on, so it " +
+                "should not get in the way — but it is a trade."
+        }
     }
-
-    private fun stickSupport(): Boolean = Build.VERSION.SDK_INT >= 34
 
     /** Somewhere new for each added control, so they do not stack on one point. */
     private fun nextSpot(existing: Int): Pair<Float, Float> {
@@ -339,6 +358,13 @@ class MainActivity : Activity() {
      * The overlay has to be up for this: it is the only window that sees the
      * gamepad, so with nothing on screen no button would ever arrive and the
      * prompt would hang for ever.
+     */
+    /**
+     * Arms a control so the next button pressed binds to it.
+     *
+     * Also reachable by tapping the control on the overlay in edit mode, which
+     * is the better way round: the controls are placed over the game, so that
+     * is where you are looking when you decide what a button should do.
      */
     private fun learn(id: String) {
         if (!TapService.isEnabled(this)) {

@@ -205,4 +205,68 @@ class LayoutTest {
         assertTrue(control.bound)
         assertEquals(1f, control.width, 0.001f)
     }
+
+    // -------------------------------------------------------------- crosshair
+
+    @Test fun `a crosshair stick is a stick, not a button`() {
+        val layout = Layout().add(
+            Control("aim", "aim", 0, 0.5f, 0.5f, kind = Kind.CURSOR, stick = Stick.RIGHT)
+        )
+        assertTrue(layout["aim"]!!.isStick)
+        assertTrue(layout["aim"]!!.isCursor)
+        assertFalse(layout["aim"]!!.isButton)
+        assertEquals(1, layout.sticks().size)
+        assertEquals("aim", layout.cursor()?.id)
+    }
+
+    @Test fun `a drag stick is not offered as a crosshair`() {
+        // A button set to fire "at crosshair" needs somewhere to aim, and a
+        // dragging finger is not a crosshair.
+        val layout = Layout().add(stick("aim", Stick.RIGHT))
+        assertNull(layout.cursor())
+    }
+
+    @Test fun `an unbound crosshair is not offered either`() {
+        val layout = Layout().add(
+            Control("aim", "aim", 0, 0.5f, 0.5f, kind = Kind.CURSOR)
+        )
+        assertNull(layout.cursor())
+    }
+
+    @Test fun `reassigning a stick does not turn a crosshair into a drag`() {
+        var layout = Layout().add(
+            Control("aim", "aim", 0, 0.5f, 0.5f, kind = Kind.CURSOR, stick = Stick.LEFT)
+        )
+        layout = layout.bindStick("aim", Stick.RIGHT)
+
+        assertEquals(Kind.CURSOR, layout["aim"]!!.kind)
+        assertEquals(Stick.RIGHT, layout["aim"]!!.stick)
+    }
+
+    @Test fun `a button can be told to fire at the crosshair`() {
+        val layout = Layout()
+            .add(control("fire", key = 96).copy(atCursor = true))
+            .add(Control("aim", "aim", 0, 0.5f, 0.5f, kind = Kind.CURSOR, stick = Stick.RIGHT))
+
+        assertTrue(layout.forKey(96)!!.atCursor)
+        assertEquals("aim", layout.cursor()?.id)
+    }
+
+    @Test fun `firing at the crosshair survives being saved`() {
+        val layout = Layout()
+            .add(control("fire", key = 96).copy(atCursor = true))
+            .add(Control("aim", "aim", 0, 0.4f, 0.4f, kind = Kind.CURSOR, stick = Stick.RIGHT))
+
+        val restored = Layout.fromJson(layout.toJson())
+
+        assertTrue(restored["fire"]!!.atCursor)
+        assertEquals(Kind.CURSOR, restored["aim"]!!.kind)
+    }
+
+    @Test fun `a stick control never answers to a key, whichever kind it is`() {
+        val layout = Layout().add(
+            Control("aim", "aim", 96, 0.5f, 0.5f, kind = Kind.CURSOR, stick = Stick.RIGHT)
+        )
+        assertNull(layout.forKey(96))
+    }
 }

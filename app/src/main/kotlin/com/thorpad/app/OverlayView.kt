@@ -79,9 +79,46 @@ class OverlayView(context: Context) : View(context) {
 
     private var dragging: String? = null
 
-    // Deliberately not focusable. Buttons arrive through the accessibility
-    // service's global key hook instead, so this window never takes focus off
-    // the game and never has to decide what to do with a back press.
+    /** The crosshair, in fractions of the screen, once a cursor stick moves it. */
+    private var cursorX: Float = -1f
+    private var cursorY: Float = -1f
+
+    private val cross = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.STROKE
+        strokeWidth = 3f
+        color = Color.parseColor("#FFD54A")
+    }
+
+    fun showCursor(x: Float, y: Float) {
+        cursorX = x
+        cursorY = y
+        postInvalidateOnAnimation()
+    }
+
+    /**
+     * Whether this window is holding focus to read the sticks.
+     *
+     * Only true below Android 14, where an accessibility service cannot see
+     * analog axes at all and a focused window is the only thing that can. It is
+     * a real cost — a focused overlay receives *every* key — so what it catches
+     * and cannot use is forwarded on rather than swallowed.
+     */
+    var catchingSticks: Boolean = false
+
+    var onMotion: ((MotionEvent) -> Unit)? = null
+    var onKey: ((android.view.KeyEvent) -> Boolean)? = null
+
+    override fun onGenericMotionEvent(event: MotionEvent): Boolean {
+        onMotion?.invoke(event)
+        // Never consumed: anything else reading the pad still gets it.
+        return false
+    }
+
+    override fun onKeyDown(keyCode: Int, event: android.view.KeyEvent): Boolean =
+        onKey?.invoke(event) ?: false
+
+    override fun onKeyUp(keyCode: Int, event: android.view.KeyEvent): Boolean =
+        onKey?.invoke(event) ?: false
 
     /** Lights a control up, so a press is visible before anything else is. */
     fun flash(id: String) {
@@ -154,10 +191,13 @@ class OverlayView(context: Context) : View(context) {
                 canvas.drawText(
                     when {
                         control.isStick && control.bound ->
-                            "${control.stick!!.name.lowercase()} stick"
+                            "${control.stick!!.name.lowercase()} stick" +
+                                if (control.isCursor) " · crosshair" else " · drag"
                         control.isStick -> "no stick"
                         control.bound -> Buttons.nameOf(control.keyCode) +
-                            if (control.press == Press.HOLD) " · hold" else ""
+                            (if (control.press == Press.HOLD) " · hold" else "") +
+                            (if (control.atCursor) " · at crosshair" else "")
+                        control.id == selectedId -> "press a button now"
                         else -> "unbound"
                     },
                     cx,
@@ -165,6 +205,17 @@ class OverlayView(context: Context) : View(context) {
                     small,
                 )
             }
+        }
+
+        if (cursorX >= 0f) {
+            val cx = cursorX * width
+            val cy = cursorY * height
+            val arm = minOf(width, height) * 0.035f
+            canvas.drawCircle(cx, cy, arm * 0.55f, cross)
+            canvas.drawLine(cx - arm, cy, cx - arm * 0.3f, cy, cross)
+            canvas.drawLine(cx + arm * 0.3f, cy, cx + arm, cy, cross)
+            canvas.drawLine(cx, cy - arm, cx, cy - arm * 0.3f, cross)
+            canvas.drawLine(cx, cy + arm * 0.3f, cx, cy + arm, cross)
         }
 
         if (editing) {
@@ -175,7 +226,14 @@ class OverlayView(context: Context) : View(context) {
             canvas.drawText("EDITING — buttons won't reach the game", 24f, 48f, banner)
             small.alpha = 255
             small.textAlign = Paint.Align.LEFT
-            canvas.drawText("drag to place · tap DONE when finished", 24f, 76f, small)
+            canvas.drawText(
+                if (selectedId != null) {
+                    "press a gamepad button to bind it · drag to move · DONE"
+                } else {
+                    "tap a control to bind it · drag to move · DONE when finished"
+                },
+                24f, 76f, small,
+            )
             small.textAlign = Paint.Align.CENTER
 
             val w = 150f
