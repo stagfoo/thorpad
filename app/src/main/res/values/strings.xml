@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">thorpad</string>
+    <string name="accessibility_description">Lets thorpad tap the screen where you put a control, so gamepad buttons can drive a game that only understands touch. It never reads screen content.</string>
+</resources>

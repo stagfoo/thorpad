@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Two capabilities, one each way.
+
+  canPerformGestures allows dispatchGesture, which is the only way an ordinary
+  app puts a touch into another app without root.
+
+  canRequestFilterKeyEvents allows onKeyEvent, which is a global key hook — the
+  only way to see a gamepad button while a game is in front *without* taking
+  focus away from it. A focused overlay would also see the buttons, but it
+  would see back and volume too, with nowhere to pass them on to.
+
+  No package filter and the narrowest event type, because this service never
+  looks at what is on screen. It only needs to exist and be running.
+-->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:description="@string/accessibility_description"
+    android:accessibilityEventTypes="typeWindowStateChanged"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:notificationTimeout="100"
+    android:canRequestFilterKeyEvents="true"
+    android:canPerformGestures="true" />
