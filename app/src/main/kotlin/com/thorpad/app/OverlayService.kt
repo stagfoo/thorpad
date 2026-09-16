@@ -97,6 +97,7 @@ class OverlayService : Service() {
         super.onCreate()
         instance = this
         store = Store(this)
+        focusAllowed = prefs.getBoolean("focusAllowed", false)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -230,6 +231,12 @@ class OverlayService : Service() {
             PixelFormat.TRANSLUCENT,
         ).apply {
             gravity = Gravity.TOP or Gravity.START
+            // Android 12 blocks touches that pass beneath an overlay owned by
+            // another app when that overlay is more opaque than this. The
+            // window is mostly transparent anyway, but the system judges it on
+            // the window's alpha, not on what was painted — so a fully opaque
+            // window of nothing silently eats every finger aimed at the game.
+            if (!editing) alpha = 0.8f
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                 layoutInDisplayCutoutMode =
                     WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
@@ -241,8 +248,26 @@ class OverlayService : Service() {
     fun needsFocus(): Boolean =
         Build.VERSION.SDK_INT < 34 && layout.usesSticks && focusAllowed
 
-    /** Turned on by the user, because it is a trade rather than a free win. */
-    var focusAllowed: Boolean = true
+    /**
+     * Whether the overlay may take window focus to read a stick.
+     *
+     * Off by default, and it stays off until someone deliberately turns it on.
+     * Taking focus does not merely cost the back button, as first assumed — a
+     * game that loses window focus commonly mutes and pauses, so the overlay
+     * going up silently stopped NIKKE responding to anything at all. That is
+     * far too large a cost to opt someone into for a feature they may not be
+     * using.
+     */
+    var focusAllowed: Boolean = false
+        set(value) {
+            field = value
+            prefs.edit().putBoolean("focusAllowed", value).apply()
+            if (showing) setMode(editing)
+        }
+
+    private val prefs by lazy {
+        getSharedPreferences("thorpad", Context.MODE_PRIVATE)
+    }
 
     /**
      * A key that arrived because this window holds focus.

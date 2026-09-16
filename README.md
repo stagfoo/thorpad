@@ -59,6 +59,12 @@ crosshair is the thing you are actually looking at while aiming and the circles
 are only a reference. Buttons keep working either way, and a press still flashes
 so it is visible that it landed.
 
+The live overlay is also drawn at 80% window alpha. Android 12 blocks touches
+that pass beneath an overlay owned by another app when that overlay is more
+opaque than that — and it judges the window, not what was painted into it, so a
+fully transparent window at full alpha silently eats every finger aimed at the
+game.
+
 **Buttons do not reach the game while editing**, and that is not a bug you can
 guess: in edit mode the overlay has to accept touches so controls can be
 dragged, which means it also catches the taps meant for the game. Edit mode now
@@ -120,10 +126,15 @@ On **Android 14 and up** an accessibility service can ask the system for motion
 events: no window, no focus, no cost.
 
 **Below 14** it cannot see them at all, and the only thing that can is a window
-holding focus. So the overlay takes focus, but only when a stick control exists
-— and because a focused overlay receives *every* key, back, home, recents and
-volume are performed outright rather than swallowed. It is still a trade, just a
-much smaller one than losing those buttons.
+holding focus. That is available, **off by default, and worth understanding
+before turning on**: a game which loses window focus commonly mutes and pauses,
+so an overlay that takes focus can stop the game responding to anything at all.
+Back, home, recents and volume are forwarded on rather than swallowed, which
+handles the smaller half of the cost — the muting is not something an app can
+forward around.
+
+Buttons need none of this. They arrive through the key hook with no window and
+no focus, so on Android 13 a button-only layout costs the game nothing.
 
 The setup screen prints the Android version, which route is in use, and a live
 count of stick events arriving.

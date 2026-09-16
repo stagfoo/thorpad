@@ -32,6 +32,7 @@ class MainActivity : Activity() {
     private lateinit var controls: LinearLayout
     private lateinit var hint: TextView
     private lateinit var mode: Button
+    private var focusToggle: Button? = null
 
     private val ticker = Handler(Looper.getMainLooper())
     private val store by lazy { Store(this) }
@@ -151,6 +152,21 @@ class MainActivity : Activity() {
             )
         )
 
+        if (Build.VERSION.SDK_INT < 34) {
+            root.addView(section("sticks on android ${Build.VERSION.SDK_INT}"))
+            focusToggle = wide("") { flipFocus() }
+            root.addView(focusToggle)
+            root.addView(
+                note(
+                    "Analog sticks are motion events, and before Android 14 " +
+                        "nothing can see them except a window holding focus. " +
+                        "The catch is that a game which loses focus usually " +
+                        "mutes and pauses — so this is off unless you turn it " +
+                        "on, and buttons work perfectly well without it."
+                )
+            )
+        }
+
         val adders = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         adders.addView(button("Button") { addControl() })
         adders.addView(button("Stick (drag)") { addStick(Kind.STICK) })
@@ -200,6 +216,16 @@ class MainActivity : Activity() {
         mode.postDelayed({ refresh() }, 120)
     }
 
+    private fun flipFocus() {
+        val running = service
+        if (running == null) {
+            status.text = "Start the controls first."
+            return
+        }
+        running.focusAllowed = !running.focusAllowed
+        refresh()
+    }
+
     private fun refresh() {
         val canTap = TapService.isEnabled(this)
         val canDraw = OverlayService.canDraw(this)
@@ -226,11 +252,29 @@ class MainActivity : Activity() {
             }
         )
 
+        val stealing = service?.needsFocus() == true
+        focusToggle?.let { toggle ->
+            toggle.text = if (service?.focusAllowed == true) {
+                "STICKS ON  —  the game may mute and pause"
+            } else {
+                "STICKS OFF  —  buttons only, game untouched"
+            }
+            toggle.setBackgroundColor(
+                if (service?.focusAllowed == true) Color.parseColor("#6A2A2A")
+                else Color.parseColor("#2A3038")
+            )
+            toggle.setTextColor(
+                if (service?.focusAllowed == true) Color.parseColor("#FFB4A6")
+                else Color.parseColor("#C8D4DE")
+            )
+        }
+
         status.text = when {
             !canTap -> "Accessibility is off — thorpad cannot tap the screen."
             !canDraw -> "Draw over other apps is off — no controls, and no gamepad."
             !showing -> "Ready."
             editing -> "Editing. Tap a control, then press a gamepad button to bind it."
+            stealing -> "Live, holding focus for the sticks — the game may mute."
             else -> "Live. Buttons tap the game; your fingers reach it too."
         }
         status.setTextColor(
@@ -254,6 +298,7 @@ class MainActivity : Activity() {
                 }
             )
             append(" · markers ").append(if (service?.markers != false) "on" else "off")
+            append("\nholding focus: ").append(if (stealing) "YES — game may mute" else "no")
             append("\ngamepad keys seen: ${service?.keysSeen ?: 0}")
             service?.lastKey?.takeIf { it != 0 }?.let {
                 append(" (last ${Buttons.nameOf(it)})")
@@ -396,9 +441,9 @@ class MainActivity : Activity() {
             )
         )
         if (Build.VERSION.SDK_INT < 34) {
-            status.text = "Below Android 14 the overlay has to hold focus to " +
-                "see a stick. Back, home and volume are forwarded on, so it " +
-                "should not get in the way — but it is a trade."
+            status.text = "Added. On Android ${Build.VERSION.SDK_INT} a stick " +
+                "only moves while the overlay holds focus — turn that on below, " +
+                "and expect the game to mute while it does."
         }
     }
 
