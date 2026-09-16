@@ -71,6 +71,25 @@ dragged, which means it also catches the taps meant for the game. Edit mode now
 says so across the top and carries its own DONE button, so you never have to go
 back to the app to leave it.
 
+## When a tap arrives and the button ignores it
+
+Two causes, both invisible from the outside, so both are adjustable rather than
+guessed at.
+
+**Tap length.** A game reads touches once a frame. A tap shorter than two frames
+can have its press and release land inside the same one, so the engine sees a
+finger appear and vanish with no press in between — the touch registers plainly
+(a ripple, a glow) and the button under it does nothing. At 30fps a frame is
+33ms, which is why the original 60ms was never a safe number. Default is now
+140ms, cycling 70 / 140 / 240 / 400.
+
+**Obscured touches.** Android marks a touch as obscured when another app's
+window sits above the point it landed on, and a view can be set to refuse
+obscured touches outright. Whether a *not-touchable* overlay counts as obscuring
+is not something to be confident about from the outside, so **Overlay ducks
+while tapping** settles it by shrinking the window to a pixel for the length of
+the tap. If buttons start working with it on, that was the cause.
+
 ## It shows its own working
 
 Every previous attempt at this failed silently somewhere in a chain nobody could

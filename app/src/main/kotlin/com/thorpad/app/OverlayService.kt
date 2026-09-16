@@ -44,6 +44,21 @@ class OverlayService : Service() {
         /** Show or hide the control markers, without touching the crosshair. */
         const val ACTION_MARKERS = "markers"
 
+        /** Cycles how long a tap presses for. */
+        const val ACTION_TAP_LENGTH = "tap-length"
+
+        /** Get the overlay out of the way while a tap lands. */
+        const val ACTION_DUCK = "duck"
+
+        /**
+         * The lengths worth trying, in ms.
+         *
+         * Two frames at 30fps is the floor for a game to see a press at all;
+         * the longer ones are for engines that want a touch to settle before
+         * they count it.
+         */
+        val TAP_LENGTHS = longArrayOf(70, 140, 240, 400)
+
         private const val CHANNEL = "thorpad"
         private const val NOTIFICATION = 1
 
@@ -79,6 +94,36 @@ class OverlayService : Service() {
     @Volatile var markers = true
         private set
 
+    /**
+     * How long a tap presses for.
+     *
+     * Adjustable because the right answer depends on the game's frame rate and
+     * how its engine counts a press, neither of which can be read from outside
+     * it. A touch that registers visibly while the button under it ignores you
+     * is this number being too small.
+     */
+    /**
+     * Whether to shrink the overlay to a pixel while a tap lands.
+     *
+     * A test, and possibly a fix. Android marks a touch as obscured when
+     * another app's window sits above the point it landed on, and a view can be
+     * set to ignore obscured touches entirely — which would look exactly like
+     * this: the touch plainly arrives, and the button under it refuses it.
+     *
+     * Whether a not-touchable overlay counts as obscuring is not something to
+     * be confident about from the outside, so this settles it by getting the
+     * window out of the way rather than by reasoning. If buttons start working
+     * with this on, that was the cause.
+     */
+    @Volatile var duck = false
+
+    @Volatile var tapMs: Long = 140
+        set(value) {
+            field = value
+            prefs.edit().putLong("tapMs", value).apply()
+            TapService.instance?.tapMs = value
+        }
+
     @Volatile var lastKey: Int = 0
         private set
 
@@ -98,6 +143,8 @@ class OverlayService : Service() {
         instance = this
         store = Store(this)
         focusAllowed = prefs.getBoolean("focusAllowed", false)
+        tapMs = prefs.getLong("tapMs", 140)
+        duck = prefs.getBoolean("duck", false)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -114,6 +161,14 @@ class OverlayService : Service() {
                 markers = !markers
                 view?.showMarkers = markers
                 refreshNotification()
+            }
+            ACTION_TAP_LENGTH -> {
+                val next = (TAP_LENGTHS.indexOf(tapMs) + 1) % TAP_LENGTHS.size
+                tapMs = TAP_LENGTHS[next]
+            }
+            ACTION_DUCK -> {
+                duck = !duck
+                prefs.edit().putBoolean("duck", duck).apply()
             }
             else -> {
                 startForeground(NOTIFICATION, notification())
@@ -349,6 +404,43 @@ class OverlayService : Service() {
         )
     }
 
+    /**
+     * Shrinks the window to a pixel and puts it back.
+     *
+     * Resized rather than removed and re-added: adding a window back costs a
+     * relayout of everything beneath it, and doing that on every button press
+     * would be visible as a stutter in the game.
+     */
+    private fun duckAway(forMs: Long) {
+        val wm = manager ?: return
+        val target = view ?: return
+        if (ducked) return
+        ducked = true
+
+        try {
+            wm.updateViewLayout(target, params(editing).apply {
+                width = 1
+                height = 1
+            })
+        } catch (e: Throwable) {
+            ducked = false
+            return
+        }
+
+        main.postDelayed({
+            ducked = false
+            val back = view ?: return@postDelayed
+            try {
+                manager?.updateViewLayout(back, params(editing))
+            } catch (e: Throwable) {
+                // The window went away underneath us; nothing to restore.
+            }
+        }, forMs)
+    }
+
+    @Volatile private var ducked = false
+    private val main = android.os.Handler(android.os.Looper.getMainLooper())
+
     private fun teardown() {
         TapService.instance?.releaseEverything()
         holding.clear()
@@ -416,6 +508,8 @@ class OverlayService : Service() {
                 // should do anything, or a held button becomes a machine gun.
                 if (event.repeatCount > 0) return true
                 view?.flash(control.id)
+                tapper.tapMs = tapMs
+                if (duck) duckAway(tapMs + 80)
                 when (control.press) {
                     Press.TAP -> tapper.tap(x, y)
                     Press.HOLD -> {

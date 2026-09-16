@@ -128,8 +128,20 @@ class TapService : AccessibilityService() {
     override fun onInterrupt() = Unit
     override fun onAccessibilityEvent(event: AccessibilityEvent?) = Unit
 
-    /** One quick touch at a point, in pixels. */
-    fun tap(x: Float, y: Float, durationMs: Long = 60) {
+    /**
+     * How long a tap presses for, in ms.
+     *
+     * Longer than feels necessary on purpose. A game reads touches once a
+     * frame, so a tap shorter than two frames can have its press and release
+     * fall inside the same one — the engine sees a finger appear and vanish
+     * with no press between, which is why a touch can plainly register (a
+     * ripple, a glow) while the button under it does nothing at all. At 30fps
+     * a frame is 33ms, so 60 was never a safe number.
+     */
+    @Volatile var tapMs: Long = 140
+
+    /** One touch at a point, in pixels. */
+    fun tap(x: Float, y: Float, durationMs: Long = tapMs) {
         val path = Path().apply {
             moveTo(x, y)
             // A stroke whose ends are identical is rejected as empty, so a tap

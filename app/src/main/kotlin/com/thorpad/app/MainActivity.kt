@@ -34,6 +34,8 @@ class MainActivity : Activity() {
     private lateinit var mode: Button
     private var focusToggle: Button? = null
     private var stickRoute: TextView? = null
+    private lateinit var tapLength: Button
+    private lateinit var duckToggle: Button
 
     private val ticker = Handler(Looper.getMainLooper())
     private val store by lazy { Store(this) }
@@ -150,6 +152,36 @@ class MainActivity : Activity() {
                 "Markers hides the control circles and leaves the crosshair, " +
                     "since the crosshair is the thing you are actually looking " +
                     "at. Buttons keep working either way."
+            )
+        )
+
+        root.addView(section("if a tap registers but nothing happens"))
+        tapLength = wide("") {
+            OverlayService.send(this, OverlayService.ACTION_TAP_LENGTH)
+            refresh()
+        }
+        root.addView(tapLength)
+        root.addView(
+            note(
+                "A game reads touches once a frame, so a tap shorter than two " +
+                    "frames can have its press and release land in the same " +
+                    "one — the touch shows up, the button ignores it. If you " +
+                    "can see the tap arrive and nothing happens, make this " +
+                    "longer first."
+            )
+        )
+
+        duckToggle = wide("") {
+            OverlayService.send(this, OverlayService.ACTION_DUCK)
+            refresh()
+        }
+        root.addView(duckToggle)
+        root.addView(
+            note(
+                "The other possibility: Android marks a touch as obscured when " +
+                    "another app's window is above it, and a button can be set " +
+                    "to refuse obscured touches. This shrinks the overlay to a " +
+                    "pixel while the tap lands. If that fixes it, that was why."
             )
         )
 
@@ -300,6 +332,18 @@ class MainActivity : Activity() {
             }
         )
 
+        tapLength.text = "Tap length: ${service?.tapMs ?: 140}ms  —  tap to change"
+        duckToggle.text = if (service?.duck == true) {
+            "Overlay ducks while tapping: ON"
+        } else {
+            "Overlay ducks while tapping: off"
+        }
+        duckToggle.setBackgroundColor(
+            if (service?.duck == true) Color.parseColor("#1F4A33")
+            else Color.parseColor("#2A3038")
+        )
+        duckToggle.setTextColor(Color.parseColor("#C8D4DE"))
+
         val stealing = service?.needsFocus() == true
         val route = service?.source() ?: Sticks.best(service?.focusAllowed == true)
         stickRoute?.apply {
@@ -358,6 +402,8 @@ class MainActivity : Activity() {
                 }
             )
             append(" · markers ").append(if (service?.markers != false) "on" else "off")
+            append("\ntap length: ").append(service?.tapMs ?: 140).append("ms")
+            append(" · ducking ").append(if (service?.duck == true) "on" else "off")
             append("\nstick route: ").append(route.label)
             append("\nholding focus: ").append(if (stealing) "YES — game may mute" else "no")
             if (route == StickSource.SHIZUKU) {
