@@ -119,22 +119,26 @@ the game acts on a tap where you put it rather than on a finger travelling.
 
 ### Reading a stick at all
 
-Analog axes are motion events, not key events, and the two arrive by completely
-different routes.
+Analog axes are motion events, not key events, and they arrive by a completely
+different route from buttons. Three routes exist, none available everywhere, and
+thorpad takes the best one going:
 
-On **Android 14 and up** an accessibility service can ask the system for motion
-events: no window, no focus, no cost.
+| Route | Available | Cost to the game |
+|---|---|---|
+| System motion events | Android 14+ | none |
+| Shizuku reading `/dev/input` | needs Shizuku started | none |
+| A focused overlay | always | **the game usually mutes and pauses** |
 
-**Below 14** it cannot see them at all, and the only thing that can is a window
-holding focus. That is available, **off by default, and worth understanding
-before turning on**: a game which loses window focus commonly mutes and pauses,
-so an overlay that takes focus can stop the game responding to anything at all.
-Back, home, recents and volume are forwarded on rather than swallowed, which
-handles the smaller half of the cost — the muting is not something an app can
-forward around.
+The last one is a genuinely poor option and is off unless switched on. A window
+holding focus can see a stick, but a game that *loses* window focus commonly
+mutes and stops responding — so the overlay going up can look exactly like the
+app breaking.
 
-Buttons need none of this. They arrive through the key hook with no window and
-no focus, so on Android 13 a button-only layout costs the game nothing.
+Shizuku is the one to use below Android 14. It runs a reader of ours as the
+shell uid, which is in the `input` group, and reads the stick straight off the
+kernel — where focus is not a concept that exists. Buttons need none of this;
+they come through a global key hook that costs the game nothing, so a
+button-only layout works everywhere with no setup at all.
 
 The setup screen prints the Android version, which route is in use, and a live
 count of stick events arriving.

@@ -118,6 +118,7 @@ class OverlayService : Service() {
             else -> {
                 startForeground(NOTIFICATION, notification())
                 setMode(editing = false)
+                startSticks()
             }
         }
         return START_STICKY
@@ -244,9 +245,51 @@ class OverlayService : Service() {
         }
     }
 
-    /** Whether a focused window is currently the only way to read the sticks. */
+    /**
+     * Whether a focused window is currently the only way to read the sticks.
+     *
+     * Only when there is nothing better. Focus is the last route on the ladder
+     * precisely because it is the one that can stop the game working.
+     */
     fun needsFocus(): Boolean =
-        Build.VERSION.SDK_INT < 34 && layout.usesSticks && focusAllowed
+        layout.usesSticks && source() == StickSource.FOCUSED_OVERLAY
+
+    fun source(): StickSource =
+        if (!layout.usesSticks) StickSource.NONE else Sticks.best(focusAllowed)
+
+    private val sticks by lazy { StickClient(this) }
+
+    /**
+     * Reads coming back from the reader running as shell.
+     *
+     * Fed into exactly the same path as a motion event, so there is one place
+     * that decides what a stick does and three places a reading can come from.
+     */
+    private val fromShell = object : IStickCallback.Stub() {
+        override fun onStick(x: Float, y: Float) {
+            onStickValues(x, y)
+        }
+
+        override fun onFailed(why: String?) {
+            shellReport = why ?: "reader stopped"
+        }
+    }
+
+    @Volatile var shellReport: String = "not started"
+        private set
+
+    /** Starts whichever stick route is available, or none. */
+    private fun startSticks() {
+        if (!layout.usesSticks) return
+        if (source() != StickSource.SHIZUKU) return
+        val stick = layout.sticks().firstOrNull()?.stick ?: Stick.RIGHT
+        sticks.start(stick, fromShell)
+        shellReport = sticks.report
+    }
+
+    private fun stopSticks() {
+        sticks.stop()
+    }
 
     /**
      * Whether the overlay may take window focus to read a stick.
@@ -311,6 +354,7 @@ class OverlayService : Service() {
         holding.clear()
         aim.clear()
         cursors.clear()
+        stopSticks()
         val wm = manager
         val target = view
         view = null
@@ -409,16 +453,46 @@ class OverlayService : Service() {
      * when there is and is not work to do.
      */
     fun onMotion(event: android.view.MotionEvent) {
-        val source = event.source
+        val eventSource = event.source
         val fromPad =
-            source and android.view.InputDevice.SOURCE_JOYSTICK != 0 ||
-                source and android.view.InputDevice.SOURCE_GAMEPAD != 0
+            eventSource and android.view.InputDevice.SOURCE_JOYSTICK != 0 ||
+                eventSource and android.view.InputDevice.SOURCE_GAMEPAD != 0
         if (!fromPad) return
 
-        val sticks = layout.sticks()
-        if (sticks.isEmpty()) return
+        val bound = layout.sticks()
+        if (bound.isEmpty()) return
+
+        // Pads disagree about where the right stick lives, so whichever pair is
+        // actually moving is taken to be it.
+        val which = bound.first().stick ?: Stick.RIGHT
+        if (which == Stick.LEFT) {
+            onStickValues(
+                event.getAxisValue(android.view.MotionEvent.AXIS_X),
+                event.getAxisValue(android.view.MotionEvent.AXIS_Y),
+            )
+            return
+        }
+        val rx = event.getAxisValue(android.view.MotionEvent.AXIS_RX)
+        val ry = event.getAxisValue(android.view.MotionEvent.AXIS_RY)
+        val z = event.getAxisValue(android.view.MotionEvent.AXIS_Z)
+        val rz = event.getAxisValue(android.view.MotionEvent.AXIS_RZ)
+        val useZ = (kotlin.math.abs(z) + kotlin.math.abs(rz)) >
+            (kotlin.math.abs(rx) + kotlin.math.abs(ry))
+        onStickValues(if (useZ) z else rx, if (useZ) rz else ry)
+    }
+
+    /**
+     * One stick reading, already normalised to -1..1.
+     *
+     * The single place a stick does anything, so a reading off evdev and a
+     * reading off a motion event cannot drift into behaving differently.
+     */
+    fun onStickValues(sx: Float, sy: Float) {
+        val sticksBound = layout.sticks()
+        if (sticksBound.isEmpty()) return
 
         motionSeen++
+        lastStick = "%+.2f,%+.2f".format(sx, sy)
 
         val bounds = view ?: return
         val width = bounds.width.toFloat()
@@ -428,34 +502,13 @@ class OverlayService : Service() {
         val now = android.os.SystemClock.uptimeMillis()
         var dt = (now - lastTick) / 1000f
         lastTick = now
-        // A first event, or one after a long quiet spell, must not teleport the
-        // finger across the screen.
+        // A first reading, or one after a long quiet spell, must not teleport
+        // the finger across the screen.
         if (dt <= 0f || dt > 0.25f) dt = 0.016f
 
         val tapper = TapService.instance ?: return
 
-        for (control in sticks) {
-            val which = control.stick ?: continue
-            val sx: Float
-            val sy: Float
-            if (which == Stick.LEFT) {
-                sx = event.getAxisValue(android.view.MotionEvent.AXIS_X)
-                sy = event.getAxisValue(android.view.MotionEvent.AXIS_Y)
-            } else {
-                // Pads disagree about where the right stick lives. Whichever
-                // pair is actually moving is the one that is it.
-                val rx = event.getAxisValue(android.view.MotionEvent.AXIS_RX)
-                val ry = event.getAxisValue(android.view.MotionEvent.AXIS_RY)
-                val z = event.getAxisValue(android.view.MotionEvent.AXIS_Z)
-                val rz = event.getAxisValue(android.view.MotionEvent.AXIS_RZ)
-                val useZ = (kotlin.math.abs(z) + kotlin.math.abs(rz)) >
-                    (kotlin.math.abs(rx) + kotlin.math.abs(ry))
-                sx = if (useZ) z else rx
-                sy = if (useZ) rz else ry
-            }
-
-            lastStick = "%s %+.2f,%+.2f".format(which.name.lowercase(), sx, sy)
-
+        for (control in sticksBound) {
             val tuned = settings.within(control.region())
 
             if (control.isCursor) {
@@ -472,9 +525,7 @@ class OverlayService : Service() {
                 continue
             }
 
-            val engine = aim.getOrPut(control.id) {
-                AimEngine(tuned)
-            }
+            val engine = aim.getOrPut(control.id) { AimEngine(tuned) }
             engine.reconfigure(tuned)
 
             val step = engine.step(sx, sy, dt, now)
@@ -490,7 +541,7 @@ class OverlayService : Service() {
                 AimEngine.Action.LIFT -> tapper.releaseHold(control.id)
                 AimEngine.Action.RESTART -> {
                     // Out of screen to drag across: lift, go back to the far
-                    // side and press again. The hitch you feel on a long sweep.
+                    // side and press again. The hitch on a long sweep.
                     tapper.releaseHold(control.id)
                     tapper.startDrag(control.id, px, py)
                 }

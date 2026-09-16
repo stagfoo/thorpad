@@ -33,6 +33,7 @@ class MainActivity : Activity() {
     private lateinit var hint: TextView
     private lateinit var mode: Button
     private var focusToggle: Button? = null
+    private var stickRoute: TextView? = null
 
     private val ticker = Handler(Looper.getMainLooper())
     private val store by lazy { Store(this) }
@@ -154,15 +155,39 @@ class MainActivity : Activity() {
 
         if (Build.VERSION.SDK_INT < 34) {
             root.addView(section("sticks on android ${Build.VERSION.SDK_INT}"))
+            root.addView(
+                note(
+                    "Analog sticks are motion events, and before Android 14 " +
+                        "nothing sees them without help. Buttons are unaffected " +
+                        "— they arrive through a global key hook that costs the " +
+                        "game nothing."
+                )
+            )
+
+            stickRoute = TextView(this).apply {
+                textSize = 12f
+                setPadding(0, dp(4), 0, dp(8))
+            }
+            root.addView(stickRoute)
+
+            root.addView(wide("Use Shizuku (recommended)") { askShizuku() })
+            root.addView(
+                note(
+                    "Shizuku reads the stick from the kernel as shell, which " +
+                        "needs no focus at all — the kernel has no idea what " +
+                        "focus is. Costs the game nothing; costs you starting " +
+                        "Shizuku again after each reboot."
+                )
+            )
+
             focusToggle = wide("") { flipFocus() }
             root.addView(focusToggle)
             root.addView(
                 note(
-                    "Analog sticks are motion events, and before Android 14 " +
-                        "nothing can see them except a window holding focus. " +
-                        "The catch is that a game which loses focus usually " +
-                        "mutes and pauses — so this is off unless you turn it " +
-                        "on, and buttons work perfectly well without it."
+                    "The fallback, and a poor one: a window holding focus can " +
+                        "see the stick, but a game that loses focus usually " +
+                        "mutes and pauses. Only worth it if Shizuku is not an " +
+                        "option."
                 )
             )
         }
@@ -216,6 +241,29 @@ class MainActivity : Activity() {
         mode.postDelayed({ refresh() }, 120)
     }
 
+    private fun askShizuku() {
+        when {
+            !Sticks.shizukuRunning() -> {
+                hint.text = "Shizuku is not running. Start it (wireless " +
+                    "debugging is the no-root way), then come back.\n\n" +
+                    "It reads /dev/input as shell, which needs no focus — so " +
+                    "unlike the fallback it costs the game nothing."
+            }
+            !Sticks.shizukuReady() -> {
+                Sticks.requestShizuku()
+                hint.text = "Allow thorpad in the Shizuku prompt."
+            }
+            else -> {
+                // Restarted so the reader actually starts: the route is chosen
+                // when the controls come up, not per frame.
+                OverlayService.send(this, OverlayService.ACTION_STOP)
+                OverlayService.send(this, OverlayService.ACTION_START)
+                hint.text = "Shizuku allowed. Sticks now read from /dev/input."
+            }
+        }
+        refresh()
+    }
+
     private fun flipFocus() {
         val running = service
         if (running == null) {
@@ -253,6 +301,18 @@ class MainActivity : Activity() {
         )
 
         val stealing = service?.needsFocus() == true
+        val route = service?.source() ?: Sticks.best(service?.focusAllowed == true)
+        stickRoute?.apply {
+            text = "Stick route: ${route.label}"
+            setTextColor(
+                when (route) {
+                    StickSource.MOTION_EVENTS, StickSource.SHIZUKU ->
+                        Color.parseColor("#9BE28B")
+                    StickSource.FOCUSED_OVERLAY -> Color.parseColor("#E0725A")
+                    StickSource.NONE -> Color.parseColor("#C9A227")
+                }
+            )
+        }
         focusToggle?.let { toggle ->
             toggle.text = if (service?.focusAllowed == true) {
                 "STICKS ON  —  the game may mute and pause"
@@ -298,7 +358,11 @@ class MainActivity : Activity() {
                 }
             )
             append(" · markers ").append(if (service?.markers != false) "on" else "off")
+            append("\nstick route: ").append(route.label)
             append("\nholding focus: ").append(if (stealing) "YES — game may mute" else "no")
+            if (route == StickSource.SHIZUKU) {
+                append("\nreader: ").append(service?.shellReport ?: "—")
+            }
             append("\ngamepad keys seen: ${service?.keysSeen ?: 0}")
             service?.lastKey?.takeIf { it != 0 }?.let {
                 append(" (last ${Buttons.nameOf(it)})")
@@ -442,8 +506,7 @@ class MainActivity : Activity() {
         )
         if (Build.VERSION.SDK_INT < 34) {
             status.text = "Added. On Android ${Build.VERSION.SDK_INT} a stick " +
-                "only moves while the overlay holds focus — turn that on below, " +
-                "and expect the game to mute while it does."
+                "needs a route — Shizuku is the one that costs the game nothing."
         }
     }
 

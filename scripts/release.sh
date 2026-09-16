@@ -31,7 +31,7 @@ built=$(printf '%s\n' "$badging" | sed -n "s/.*versionName='\([^']*\)'.*/\1/p" |
 dexdump=$(ls -d "$sdk"/build-tools/*/dexdump | sort -V | tail -1)
 work=$(mktemp -d); trap 'rm -rf "$work"' RETURN
 unzip -o -q "$apk" "classes*.dex" -d "$work"
-for class in TapService OverlayService MainActivity; do
+for class in TapService OverlayService MainActivity StickService; do
   found=$(for d in "$work"/*.dex; do "$dexdump" "$d" 2>/dev/null; done \
     | grep -c "Lcom/thorpad/app/$class;" || true)
   [ "$found" -gt 0 ] || { echo "R8 stripped $class" >&2; exit 1; }
