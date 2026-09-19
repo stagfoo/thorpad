@@ -47,6 +47,12 @@ class OverlayService : Service() {
         /** Cycles how long a tap presses for. */
         const val ACTION_TAP_LENGTH = "tap-length"
 
+        /** Cycles how far a held finger wanders. */
+        const val ACTION_JITTER = "jitter"
+
+        /** Pixels a held finger drifts each segment. 0 is as still as it gets. */
+        val JITTERS = floatArrayOf(0f, 2f, 5f, 10f)
+
         /** Get the overlay out of the way while a tap lands. */
         const val ACTION_DUCK = "duck"
 
@@ -117,6 +123,21 @@ class OverlayService : Service() {
      */
     @Volatile var duck = false
 
+    /**
+     * How far a held finger wanders, in pixels.
+     *
+     * A hold that never moves emits a down and then nothing, and some engines
+     * take that as a finger present but idle — so a button held to keep
+     * shooting quietly stops. How much counts as "still moving" is the game's
+     * decision, so this is a setting rather than a constant.
+     */
+    @Volatile var holdJitter: Float = 2f
+        set(value) {
+            field = value
+            prefs.edit().putFloat("holdJitter", value).apply()
+            TapService.instance?.holdJitter = value
+        }
+
     @Volatile var tapMs: Long = 140
         set(value) {
             field = value
@@ -144,6 +165,7 @@ class OverlayService : Service() {
         store = Store(this)
         focusAllowed = prefs.getBoolean("focusAllowed", false)
         tapMs = prefs.getLong("tapMs", 140)
+        holdJitter = prefs.getFloat("holdJitter", 2f)
         duck = prefs.getBoolean("duck", false)
     }
 
@@ -165,6 +187,10 @@ class OverlayService : Service() {
             ACTION_TAP_LENGTH -> {
                 val next = (TAP_LENGTHS.indexOf(tapMs) + 1) % TAP_LENGTHS.size
                 tapMs = TAP_LENGTHS[next]
+            }
+            ACTION_JITTER -> {
+                val at = JITTERS.indexOfFirst { it == holdJitter }
+                holdJitter = JITTERS[(if (at < 0) 0 else at + 1) % JITTERS.size]
             }
             ACTION_DUCK -> {
                 duck = !duck
@@ -411,10 +437,24 @@ class OverlayService : Service() {
      * relayout of everything beneath it, and doing that on every button press
      * would be visible as a stutter in the game.
      */
-    private fun duckAway(forMs: Long) {
+    /**
+     * @param forMs how long to stay out of the way, or null to stay until
+     *   [unduck] is called. A held button needs the latter: restoring the
+     *   overlay part-way through a hold puts it back over the finger that is
+     *   still down, and if ducking was what made the touch land in the first
+     *   place, the hold simply ends there.
+     */
+    private fun duckAway(forMs: Long?) {
         val wm = manager ?: return
         val target = view ?: return
-        if (ducked) return
+        // A second press while one is already ducked must not schedule a
+        // restore of its own: the first one to come back would surface the
+        // overlay under the other's finger.
+        ducking++
+        if (ducked) {
+            if (forMs != null) main.postDelayed({ unduck() }, forMs)
+            return
+        }
         ducked = true
 
         try {
@@ -424,25 +464,36 @@ class OverlayService : Service() {
             })
         } catch (e: Throwable) {
             ducked = false
+            ducking--
             return
         }
 
-        main.postDelayed({
-            ducked = false
-            val back = view ?: return@postDelayed
-            try {
-                manager?.updateViewLayout(back, params(editing))
-            } catch (e: Throwable) {
-                // The window went away underneath us; nothing to restore.
-            }
-        }, forMs)
+        if (forMs != null) main.postDelayed({ unduck() }, forMs)
     }
+
+    /** Puts the overlay back, once nothing is still holding it down. */
+    private fun unduck() {
+        if (ducking > 0) ducking--
+        if (ducking > 0 || !ducked) return
+        ducked = false
+        val back = view ?: return
+        try {
+            manager?.updateViewLayout(back, params(editing))
+        } catch (e: Throwable) {
+            // The window went away underneath us; nothing to restore.
+        }
+    }
+
+    @Volatile private var ducking = 0
 
     @Volatile private var ducked = false
     private val main = android.os.Handler(android.os.Looper.getMainLooper())
 
     private fun teardown() {
         TapService.instance?.releaseEverything()
+        // Every hold that was keeping the overlay down is gone with it, so the
+        // count has to go too or the window never comes back.
+        while (ducking > 0) unduck()
         holding.clear()
         aim.clear()
         cursors.clear()
@@ -509,18 +560,28 @@ class OverlayService : Service() {
                 if (event.repeatCount > 0) return true
                 view?.flash(control.id)
                 tapper.tapMs = tapMs
-                if (duck) duckAway(tapMs + 80)
                 when (control.press) {
-                    Press.TAP -> tapper.tap(x, y)
+                    Press.TAP -> {
+                        if (duck) duckAway(tapMs + 80)
+                        tapper.tap(x, y)
+                    }
                     Press.HOLD -> {
+                        // Ducked with no timer: the overlay stays out of the
+                        // way for exactly as long as the button is held, and
+                        // comes back on release.
+                        if (duck) duckAway(null)
                         holding[event.keyCode] = control.id
+                        tapper.holdJitter = holdJitter
                         tapper.startHold(control.id, x, y)
                     }
                 }
             }
 
             KeyEvent.ACTION_UP -> {
-                holding.remove(event.keyCode)?.let { tapper.releaseHold(it) }
+                holding.remove(event.keyCode)?.let {
+                    tapper.releaseHold(it)
+                    if (duck) unduck()
+                }
             }
         }
         return true

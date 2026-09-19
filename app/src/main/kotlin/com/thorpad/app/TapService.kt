@@ -140,6 +140,19 @@ class TapService : AccessibilityService() {
      */
     @Volatile var tapMs: Long = 140
 
+    /**
+     * How far a held finger wanders, in pixels.
+     *
+     * A hold that never moves emits a down and then nothing. Some engines take
+     * that as a finger that is present but idle and stop acting on it, so a
+     * button held to keep shooting quietly stops shooting. A pixel or two each
+     * segment is a real movement event without being enough to drag anything.
+     *
+     * Adjustable because how much counts as "still moving" is the game's
+     * decision, not something readable from out here.
+     */
+    @Volatile var holdJitter: Float = 2f
+
     /** One touch at a point, in pixels. */
     fun tap(x: Float, y: Float, durationMs: Long = tapMs) {
         val path = Path().apply {
@@ -281,11 +294,22 @@ class TapService : AccessibilityService() {
             dispatch(last.continueStroke(pathTo(atX, atY), 0, 40, false), null)
         }
 
+        private var wander = 1f
+
         private fun pathTo(x: Float, y: Float): Path = Path().apply {
             moveTo(atX, atY)
-            // A stroke whose ends are identical is rejected as empty, so a
-            // stationary finger still needs a tenth of a pixel of travel.
-            if (x == atX && y == atY) lineTo(x + 0.1f, y) else lineTo(x, y)
+            if (x == atX && y == atY) {
+                // A stroke whose ends are identical is rejected as empty, and
+                // one that barely moves reads to some engines as a finger that
+                // has stopped. So a stationary hold drifts a pixel or two,
+                // alternating, which keeps it within a fingertip of where it
+                // was put while still being movement.
+                wander = -wander
+                val nudge = if (holdJitter <= 0f) 0.1f else holdJitter
+                lineTo(x + nudge * wander, y)
+            } else {
+                lineTo(x, y)
+            }
         }
 
         private fun step(first: Boolean) {
@@ -294,16 +318,30 @@ class TapService : AccessibilityService() {
             val toY = wantY
             val path = pathTo(toX, toY)
 
-            val stroke = if (first || previous == null) {
+            // A continuation of a stroke the system already cancelled is
+            // refused, and taking that as the end of the hold means a button
+            // held down quietly stops doing anything. Starting a fresh stroke
+            // instead costs one lift and press that nobody sees.
+            val stroke = try {
+                if (first || previous == null) {
+                    GestureDescription.StrokeDescription(path, 0, segmentMs, true)
+                } else {
+                    previous!!.continueStroke(path, 0, segmentMs, true)
+                }
+            } catch (e: Throwable) {
+                previous = null
                 GestureDescription.StrokeDescription(path, 0, segmentMs, true)
-            } else {
-                previous!!.continueStroke(path, 0, segmentMs, true)
             }
             previous = stroke
             atX = toX
             atY = toY
 
-            dispatch(stroke) { if (alive) step(first = false) }
+            if (!dispatch(stroke) { if (alive) step(first = false) }) {
+                // Refused outright rather than cancelled mid-flight: try again
+                // from scratch on the next segment rather than going quiet.
+                previous = null
+                if (alive) main.postDelayed({ step(first = true) }, segmentMs)
+            }
         }
     }
 }

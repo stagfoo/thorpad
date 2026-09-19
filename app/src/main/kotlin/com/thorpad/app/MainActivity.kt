@@ -36,6 +36,7 @@ class MainActivity : Activity() {
     private var stickRoute: TextView? = null
     private lateinit var tapLength: Button
     private lateinit var duckToggle: Button
+    private lateinit var holdJitter: Button
 
     private val ticker = Handler(Looper.getMainLooper())
     private val store by lazy { Store(this) }
@@ -168,6 +169,21 @@ class MainActivity : Activity() {
                     "one — the touch shows up, the button ignores it. If you " +
                     "can see the tap arrive and nothing happens, make this " +
                     "longer first."
+            )
+        )
+
+        holdJitter = wide("") {
+            OverlayService.send(this, OverlayService.ACTION_JITTER)
+            refresh()
+        }
+        root.addView(holdJitter)
+        root.addView(
+            note(
+                "A held finger that never moves emits a press and then " +
+                    "nothing, and some games take that as a finger sitting " +
+                    "idle and stop acting on it — so holding to keep shooting " +
+                    "quietly stops. This drifts it a pixel or two, which is " +
+                    "movement without dragging anything."
             )
         )
 
@@ -333,6 +349,12 @@ class MainActivity : Activity() {
         )
 
         tapLength.text = "Tap length: ${service?.tapMs ?: 140}ms  —  tap to change"
+        val jitter = service?.holdJitter ?: 2f
+        holdJitter.text = if (jitter <= 0f) {
+            "Held finger: perfectly still  —  tap to change"
+        } else {
+            "Held finger drifts ${jitter.toInt()}px  —  tap to change"
+        }
         duckToggle.text = if (service?.duck == true) {
             "Overlay ducks while tapping: ON"
         } else {
@@ -404,6 +426,7 @@ class MainActivity : Activity() {
             append(" · markers ").append(if (service?.markers != false) "on" else "off")
             append("\ntap length: ").append(service?.tapMs ?: 140).append("ms")
             append(" · ducking ").append(if (service?.duck == true) "on" else "off")
+            append("\nhold jitter: ").append((service?.holdJitter ?: 2f).toInt()).append("px")
             append("\nstick route: ").append(route.label)
             append("\nholding focus: ").append(if (stealing) "YES — game may mute" else "no")
             if (route == StickSource.SHIZUKU) {
@@ -455,7 +478,11 @@ class MainActivity : Activity() {
                         "${control.label}  →  ${control.stick!!.name.lowercase()} stick"
                     control.isStick -> "${control.label}  →  no stick"
                     else -> "${control.label}  →  ${Buttons.nameOf(control.keyCode)}" +
-                        if (control.press == Press.HOLD) "  (hold)" else ""
+                        if (control.press == Press.HOLD) {
+                            "  (touch lasts as long as the button)"
+                        } else {
+                            "  (quick tap)"
+                        }
                 }
                 setTextColor(
                     if (control.bound) Color.parseColor("#D7DEE5")
@@ -474,7 +501,7 @@ class MainActivity : Activity() {
                 })
             } else {
                 box.addView(button("Bind") { learn(control.id) })
-                box.addView(button(if (control.press == Press.HOLD) "Tap" else "Hold") {
+                box.addView(button(if (control.press == Press.HOLD) "→Tap" else "→Hold") {
                     update(
                         layoutNow().replace(
                             control.copy(

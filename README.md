@@ -71,6 +71,31 @@ dragged, which means it also catches the taps meant for the game. Edit mode now
 says so across the top and carries its own DONE button, so you never have to go
 back to the app to leave it.
 
+## Hold: a touch that lasts as long as the button
+
+A control set to **Hold** presses when the button goes down and releases when it
+comes up, rather than tapping for a fixed length. That is what a game wants when
+holding does something and letting go does something else — hold to leave cover
+and shoot, release to drop back in.
+
+Two things make the difference between that working and nearly working:
+
+**The overlay ducks for the whole hold, not for a moment.** If ducking is what
+makes the touch land at all, restoring the overlay part-way through puts it back
+over a finger that is still down and the hold ends there. It now stays out of
+the way until the button is released, and counts holds so two at once do not
+surface it under each other.
+
+**A held finger drifts a pixel or two.** A hold that never moves emits a press
+and then nothing at all, and some engines read that as a finger present but idle
+and stop acting on it — so holding to keep shooting quietly stops shooting. The
+drift is movement without dragging anything, and is adjustable (0 / 2 / 5 / 10px)
+because how much counts as still moving is the game's decision.
+
+The hold also restarts its own stroke chain if the system cancels a segment.
+Taking a cancellation as the end of the hold means a button held down goes quiet
+for no visible reason.
+
 ## When a tap arrives and the button ignores it
 
 Two causes, both invisible from the outside, so both are adjustable rather than
