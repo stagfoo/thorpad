@@ -96,6 +96,20 @@ The hold also restarts its own stroke chain if the system cancels a segment.
 Taking a cancellation as the end of the hold means a button held down goes quiet
 for no visible reason.
 
+**A continued stroke must begin exactly where the previous one ended.** The
+jitter broke that: it moved the finger without recording where it actually left
+it, so every stationary segment put the written-down position a nudge behind the
+real one. Standing still was survivable; the moment the crosshair moved, the
+continuation started somewhere the previous stroke had not finished and the
+gesture API threw — holding and aiming at once took the app down. The endpoint is
+recorded with the jitter included now, and `HoldChainTest` walks the sequence
+that crashed (jitter, jitter, sweep) asserting each segment starts where the last
+one ended.
+
+Nothing in the chain can take the app down any more either. A refused stroke is
+a reason to start a new chain, never a reason to die — an input mapper that
+crashes because one gesture was rejected loses the layout mid-game.
+
 ## When a tap arrives and the button ignores it
 
 Two causes, both invisible from the outside, so both are adjustable rather than

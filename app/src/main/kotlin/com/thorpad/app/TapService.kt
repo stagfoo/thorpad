@@ -296,56 +296,82 @@ class TapService : AccessibilityService() {
             alive = false
             val last = previous ?: return
             previous = null
-            dispatch(last.continueStroke(pathTo(atX, atY), 0, 40, false), null)
+            try {
+                val path = Path().apply {
+                    moveTo(atX, atY)
+                    lineTo(atX + 0.1f, atY)
+                }
+                dispatch(last.continueStroke(path, 0, 40, false), null)
+            } catch (e: Throwable) {
+                // The chain was already broken; the finger is up either way.
+                lastError = "release: ${e.javaClass.simpleName}"
+            }
         }
 
         private var wander = 1f
 
-        private fun pathTo(x: Float, y: Float): Path = Path().apply {
-            moveTo(atX, atY)
-            if (x == atX && y == atY) {
-                // A stroke whose ends are identical is rejected as empty, and
-                // one that barely moves reads to some engines as a finger that
-                // has stopped. So a stationary hold drifts a pixel or two,
-                // alternating, which keeps it within a fingertip of where it
-                // was put while still being movement.
-                wander = -wander
-                val nudge = if (holdJitter <= 0f) 0.1f else holdJitter
-                lineTo(x + nudge * wander, y)
-            } else {
-                lineTo(x, y)
-            }
+        /**
+         * Where the next segment should end, and the wander applied if it is
+         * standing still.
+         *
+         * Returned rather than baked into a path, because the caller has to
+         * record the point the stroke *actually* finished at. A continuation
+         * must begin exactly where the last one ended — and the jitter used to
+         * move the finger without that being written down, so every stationary
+         * segment left the recorded position a nudge behind the real one. The
+         * next time the crosshair moved, the continuation started somewhere the
+         * previous stroke had not finished, and the gesture API threw.
+         */
+        private fun nextPoint(): Pair<Float, Float> {
+            val toX = wantX
+            val toY = wantY
+            if (toX != atX || toY != atY) return toX to toY
+
+            // A stroke whose ends are identical is rejected as empty, and one
+            // that barely moves reads to some engines as a finger that has
+            // stopped. So a stationary hold drifts, alternating, which keeps it
+            // within a fingertip of where it was put while still being movement.
+            wander = -wander
+            val nudge = if (holdJitter <= 0f) 0.1f else holdJitter
+            return (atX + nudge * wander) to atY
         }
 
         private fun step(first: Boolean) {
             if (!alive) return
-            val toX = wantX
-            val toY = wantY
-            val path = pathTo(toX, toY)
+            val (toX, toY) = nextPoint()
+            val path = Path().apply {
+                moveTo(atX, atY)
+                lineTo(toX, toY)
+            }
 
-            // A continuation of a stroke the system already cancelled is
-            // refused, and taking that as the end of the hold means a button
-            // held down quietly stops doing anything. Starting a fresh stroke
-            // instead costs one lift and press that nobody sees.
-            val stroke = try {
-                if (first || previous == null) {
+            // Wrapped whole. A refused stroke is a reason to start a new chain,
+            // never a reason to take the app down — an input mapper that dies
+            // because one gesture was rejected loses the layout mid-game.
+            val ok = try {
+                // A continuation of a stroke the system already cancelled is
+                // refused, and treating that as the end of the hold means a
+                // button held down quietly stops doing anything. A fresh stroke
+                // instead costs one lift and press that nobody sees.
+                val stroke = if (first || previous == null) {
                     GestureDescription.StrokeDescription(path, 0, segmentMs, true)
                 } else {
                     previous!!.continueStroke(path, 0, segmentMs, true)
                 }
+                previous = stroke
+                // The real endpoint, jitter and all, so the next continuation
+                // starts exactly where this one finished.
+                atX = toX
+                atY = toY
+                dispatch(stroke) { if (alive) step(first = false) }
             } catch (e: Throwable) {
+                lastError = "hold: ${e.javaClass.simpleName}: ${e.message}"
                 previous = null
-                GestureDescription.StrokeDescription(path, 0, segmentMs, true)
+                false
             }
-            previous = stroke
-            atX = toX
-            atY = toY
 
-            if (!dispatch(stroke) { if (alive) step(first = false) }) {
-                // Refused outright rather than cancelled mid-flight: try again
-                // from scratch on the next segment rather than going quiet.
+            if (!ok && alive) {
                 previous = null
-                if (alive) main.postDelayed({ step(first = true) }, segmentMs)
+                main.postDelayed({ step(first = true) }, segmentMs)
             }
         }
     }
