@@ -104,13 +104,6 @@ class OverlayView(context: Context) : View(context) {
         color = Color.parseColor("#FFD54A")
     }
 
-    /** Crosshair radius as a fraction of the screen's short side. */
-    var cursorSize: Float = 0.035f
-        set(value) {
-            field = value
-            invalidate()
-        }
-
     fun showCursor(x: Float, y: Float) {
         cursorX = x
         cursorY = y
@@ -234,20 +227,6 @@ class OverlayView(context: Context) : View(context) {
                     small,
                 )
             }
-        }
-
-        if (cursorX >= 0f) {
-            val cx = cursorX * width
-            val cy = cursorY * height
-            val arm = minOf(width, height) * cursorSize
-            // The stroke grows with the crosshair: a hairline at 9% of the
-            // screen reads as a scratch rather than as a sight.
-            cross.strokeWidth = (arm * 0.09f).coerceIn(2f, 6f)
-            canvas.drawCircle(cx, cy, arm * 0.55f, cross)
-            canvas.drawLine(cx - arm, cy, cx - arm * 0.3f, cy, cross)
-            canvas.drawLine(cx + arm * 0.3f, cy, cx + arm, cy, cross)
-            canvas.drawLine(cx, cy - arm, cx, cy - arm * 0.3f, cross)
-            canvas.drawLine(cx, cy + arm * 0.3f, cx, cy + arm, cross)
         }
 
         if (!editing) {

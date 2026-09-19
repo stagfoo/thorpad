@@ -90,6 +90,18 @@ class OverlayService : Service() {
     private var manager: WindowManager? = null
     private var view: OverlayView? = null
 
+    /**
+     * The crosshair's own window.
+     *
+     * Separate because ducking shrinks the controls window to a pixel, and the
+     * crosshair used to be painted on it — so it disappeared for exactly as
+     * long as a button was held, which is exactly when it is being aimed by.
+     * This one never ducks, and is only as big as the crosshair, so what it
+     * obscures is a thumbnail rather than the screen.
+     */
+    private var crosshair: CrosshairView? = null
+    private var crosshairAt: Pair<Float, Float>? = null
+
     /** Which control each held button is holding, so key-up releases the right one. */
     private val holding = mutableMapOf<Int, String>()
 
@@ -152,7 +164,7 @@ class OverlayService : Service() {
         set(value) {
             field = value
             prefs.edit().putFloat("cursorSize", value).apply()
-            view?.cursorSize = value
+            sizeCrosshair()
         }
 
     @Volatile var holdJitter: Float = 2f
@@ -293,7 +305,6 @@ class OverlayService : Service() {
         val target = existing ?: OverlayView(this).apply {
             layout = store.load()
             showMarkers = markers
-            cursorSize = this@OverlayService.cursorSize
             onMotion = { event -> this@OverlayService.onMotion(event) }
             onKey = { event -> this@OverlayService.onFocusedKey(event) }
             onMoved = ::moveControl
@@ -617,7 +628,74 @@ class OverlayService : Service() {
     @Volatile private var ducked = false
     private val main = android.os.Handler(android.os.Looper.getMainLooper())
 
+    /** Puts the crosshair window up, or moves it to where the crosshair is. */
+    private fun placeCrosshair(x: Float, y: Float) {
+        if (!canDraw(this)) return
+        val wm = manager ?: (getSystemService(Context.WINDOW_SERVICE) as? WindowManager)
+            ?: return
+        manager = wm
+        crosshairAt = x to y
+
+        val short = minOf(
+            resources.displayMetrics.widthPixels,
+            resources.displayMetrics.heightPixels,
+        )
+        val arm = short * cursorSize
+        val box = (arm * 2.4f).toInt().coerceAtLeast(8)
+
+        val existing = crosshair
+        val target = existing ?: CrosshairView(this)
+        target.arm = arm
+
+        val params = WindowManager.LayoutParams(
+            box, box,
+            WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+            WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            PixelFormat.TRANSLUCENT,
+        ).apply {
+            gravity = Gravity.TOP or Gravity.START
+            this.x = (x * resources.displayMetrics.widthPixels - box / 2).toInt()
+            this.y = (y * resources.displayMetrics.heightPixels - box / 2).toInt()
+            // Same reason as the controls window: Android 12 blocks touches
+            // passing beneath an overlay more opaque than this.
+            alpha = 0.8f
+        }
+
+        try {
+            if (existing == null) {
+                wm.addView(target, params)
+                crosshair = target
+            } else {
+                wm.updateViewLayout(target, params)
+            }
+        } catch (e: Throwable) {
+            crosshair = null
+        }
+    }
+
+    private fun sizeCrosshair() {
+        crosshairAt?.let { placeCrosshair(it.first, it.second) }
+    }
+
+    private fun hideCrosshair() {
+        val wm = manager
+        val target = crosshair
+        crosshair = null
+        crosshairAt = null
+        if (wm != null && target != null) {
+            try {
+                wm.removeView(target)
+            } catch (e: Throwable) {
+                // Already gone.
+            }
+        }
+    }
+
     private fun teardown() {
+        hideCrosshair()
         TapService.instance?.releaseEverything()
         // Every hold that was keeping the overlay down is gone with it, so the
         // count has to go too or the window never comes back.
@@ -814,7 +892,7 @@ class OverlayService : Service() {
                 }
                 cursor.reconfigure(tuned)
                 if (cursor.step(sx, sy, dt)) {
-                    view?.showCursor(cursor.x, cursor.y)
+                    placeCrosshair(cursor.x, cursor.y)
                     // Anything held at the crosshair travels with it, so one
                     // finger holds *and* aims.
                     if (followingCursor.isNotEmpty()) {
@@ -849,7 +927,7 @@ class OverlayService : Service() {
     /** Puts the crosshair on screen as soon as there is one to show. */
     private fun showCursorNow() {
         val spot = cursorSpot() ?: return
-        view?.showCursor(spot.first, spot.second)
+        placeCrosshair(spot.first, spot.second)
         // Anything already held at it jumps to where it actually is, rather
         // than staying wherever it was pressed.
         if (followingCursor.isNotEmpty()) {
