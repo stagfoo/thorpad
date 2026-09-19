@@ -156,10 +156,18 @@ it, so both are here.
 tracks a travelling touch reads for aiming. The dashed rectangle on the overlay
 is where the finger may go.
 
-**Stick (crosshair)** injects nothing at all. It moves a marker, and a button
-set to **✛ on** taps wherever that marker is. Far less to ask of a game — no
-stroke to run out of, no region edge, no recentring hitch — but it only helps if
-the game acts on a tap where you put it rather than on a finger travelling.
+**Stick (crosshair)** injects nothing on its own. It moves a marker, and a
+button set to **✛ on** touches wherever that marker is. Far less to ask of a
+game — no stroke to run out of, no region edge, no recentring hitch.
+
+**A button held at the crosshair follows it.** That is what makes the crosshair
+worth having rather than a novelty: in a game where holding zooms and dragging
+aims, one finger has to do both. A hold that read the crosshair once at press
+time would zoom and then refuse to look around.
+
+**Crosshair speed** (0.8–4.5 screens a second) and **size** (small to huge) are
+both adjustable, because neither is knowable from outside the game you are
+pointing it at.
 
 ### Reading a stick at all
 

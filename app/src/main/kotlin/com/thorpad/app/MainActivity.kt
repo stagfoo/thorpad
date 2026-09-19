@@ -37,6 +37,8 @@ class MainActivity : Activity() {
     private lateinit var tapLength: Button
     private lateinit var duckToggle: Button
     private lateinit var holdJitter: Button
+    private lateinit var sensitivity: Button
+    private lateinit var cursorSize: Button
 
     private val ticker = Handler(Looper.getMainLooper())
     private val store by lazy { Store(this) }
@@ -153,6 +155,26 @@ class MainActivity : Activity() {
                 "Markers hides the control circles and leaves the crosshair, " +
                     "since the crosshair is the thing you are actually looking " +
                     "at. Buttons keep working either way."
+            )
+        )
+
+        root.addView(section("crosshair"))
+        sensitivity = wide("") {
+            OverlayService.send(this, OverlayService.ACTION_SENSITIVITY)
+            refresh()
+        }
+        root.addView(sensitivity)
+        cursorSize = wide("") {
+            OverlayService.send(this, OverlayService.ACTION_CURSOR_SIZE)
+            refresh()
+        }
+        root.addView(cursorSize)
+        root.addView(
+            note(
+                "A button set to fire at the crosshair now follows it while " +
+                    "held, so one finger can hold and aim at once — which is " +
+                    "what a game wants when holding zooms and dragging looks " +
+                    "around."
             )
         )
 
@@ -348,6 +370,17 @@ class MainActivity : Activity() {
             }
         )
 
+        val speed = service?.settings?.maxSpeed ?: 2.2f
+        sensitivity.text = "Crosshair speed: ${"%.1f".format(speed)} screens/sec" +
+            "  —  tap to change"
+        val size = service?.cursorSize ?: 0.035f
+        cursorSize.text = "Crosshair size: " + when {
+            size <= 0.02f -> "small"
+            size <= 0.04f -> "medium"
+            size <= 0.07f -> "large"
+            else -> "huge"
+        } + "  —  tap to change"
+
         tapLength.text = "Tap length: ${service?.tapMs ?: 140}ms  —  tap to change"
         val jitter = service?.holdJitter ?: 2f
         holdJitter.text = if (jitter <= 0f) {
@@ -427,6 +460,7 @@ class MainActivity : Activity() {
             append("\ntap length: ").append(service?.tapMs ?: 140).append("ms")
             append(" · ducking ").append(if (service?.duck == true) "on" else "off")
             append("\nhold jitter: ").append((service?.holdJitter ?: 2f).toInt()).append("px")
+            append(" · crosshair ").append("%.1f".format(speed)).append(" screens/s")
             append("\nstick route: ").append(route.label)
             append("\nholding focus: ").append(if (stealing) "YES — game may mute" else "no")
             if (route == StickSource.SHIZUKU) {

@@ -53,6 +53,18 @@ class OverlayService : Service() {
         /** Pixels a held finger drifts each segment. 0 is as still as it gets. */
         val JITTERS = floatArrayOf(0f, 2f, 5f, 10f)
 
+        /** Cycles how fast the crosshair moves. */
+        const val ACTION_SENSITIVITY = "sensitivity"
+
+        /** Cycles how big the crosshair is drawn. */
+        const val ACTION_CURSOR_SIZE = "cursor-size"
+
+        /** Screen widths a second at full tilt. */
+        val SENSITIVITIES = floatArrayOf(0.8f, 1.4f, 2.2f, 3.2f, 4.5f)
+
+        /** Crosshair radius as a fraction of the screen's short side. */
+        val CURSOR_SIZES = floatArrayOf(0.018f, 0.035f, 0.06f, 0.09f)
+
         /** Get the overlay out of the way while a tap lands. */
         const val ACTION_DUCK = "duck"
 
@@ -86,6 +98,16 @@ class OverlayService : Service() {
 
     /** Which control each held button is holding, so key-up releases the right one. */
     private val holding = mutableMapOf<Int, String>()
+
+    /**
+     * Held fingers that were put down at the crosshair, and so must follow it.
+     *
+     * The thing that makes a crosshair worth having. A game where holding zooms
+     * and dragging aims needs one finger doing both — a hold that read the
+     * crosshair once at press time would zoom and then refuse to look around,
+     * which is most of the way to useless.
+     */
+    private val followingCursor = mutableSetOf<String>()
 
     @Volatile var editing = false
         private set
@@ -131,6 +153,14 @@ class OverlayService : Service() {
      * shooting quietly stops. How much counts as "still moving" is the game's
      * decision, so this is a setting rather than a constant.
      */
+    /** How big the crosshair is drawn, as a fraction of the screen's short side. */
+    @Volatile var cursorSize: Float = 0.035f
+        set(value) {
+            field = value
+            prefs.edit().putFloat("cursorSize", value).apply()
+            view?.cursorSize = value
+        }
+
     @Volatile var holdJitter: Float = 2f
         set(value) {
             field = value
@@ -166,6 +196,10 @@ class OverlayService : Service() {
         focusAllowed = prefs.getBoolean("focusAllowed", false)
         tapMs = prefs.getLong("tapMs", 140)
         holdJitter = prefs.getFloat("holdJitter", 2f)
+        cursorSize = prefs.getFloat("cursorSize", 0.035f)
+        settings = settings.copy(
+            maxSpeed = prefs.getFloat("sensitivity", settings.maxSpeed),
+        )
         duck = prefs.getBoolean("duck", false)
     }
 
@@ -187,6 +221,16 @@ class OverlayService : Service() {
             ACTION_TAP_LENGTH -> {
                 val next = (TAP_LENGTHS.indexOf(tapMs) + 1) % TAP_LENGTHS.size
                 tapMs = TAP_LENGTHS[next]
+            }
+            ACTION_SENSITIVITY -> {
+                val at = SENSITIVITIES.indexOfFirst { it == settings.maxSpeed }
+                val next = SENSITIVITIES[(if (at < 0) 1 else at + 1) % SENSITIVITIES.size]
+                settings = settings.copy(maxSpeed = next)
+                prefs.edit().putFloat("sensitivity", next).apply()
+            }
+            ACTION_CURSOR_SIZE -> {
+                val at = CURSOR_SIZES.indexOfFirst { it == cursorSize }
+                cursorSize = CURSOR_SIZES[(if (at < 0) 1 else at + 1) % CURSOR_SIZES.size]
             }
             ACTION_JITTER -> {
                 val at = JITTERS.indexOfFirst { it == holdJitter }
@@ -255,6 +299,7 @@ class OverlayService : Service() {
         val target = existing ?: OverlayView(this).apply {
             layout = store.load()
             showMarkers = markers
+            cursorSize = this@OverlayService.cursorSize
             onMotion = { event -> this@OverlayService.onMotion(event) }
             onKey = { event -> this@OverlayService.onFocusedKey(event) }
             onMoved = ::moveControl
@@ -495,6 +540,7 @@ class OverlayService : Service() {
         // count has to go too or the window never comes back.
         while (ducking > 0) unduck()
         holding.clear()
+        followingCursor.clear()
         aim.clear()
         cursors.clear()
         stopSticks()
@@ -572,13 +618,22 @@ class OverlayService : Service() {
                         if (duck) duckAway(null)
                         holding[event.keyCode] = control.id
                         tapper.holdJitter = holdJitter
-                        tapper.startHold(control.id, x, y)
+                        // startDrag rather than startHold when it is following
+                        // the crosshair: the same finger, but one whose
+                        // destination can still change.
+                        if (control.atCursor && cursorSpot() != null) {
+                            followingCursor.add(control.id)
+                            tapper.startDrag(control.id, x, y)
+                        } else {
+                            tapper.startHold(control.id, x, y)
+                        }
                     }
                 }
             }
 
             KeyEvent.ACTION_UP -> {
                 holding.remove(event.keyCode)?.let {
+                    followingCursor.remove(it)
                     tapper.releaseHold(it)
                     if (duck) unduck()
                 }
@@ -676,6 +731,13 @@ class OverlayService : Service() {
                 cursor.reconfigure(tuned)
                 if (cursor.step(sx, sy, dt)) {
                     view?.showCursor(cursor.x, cursor.y)
+                    // Anything held at the crosshair travels with it, so one
+                    // finger holds *and* aims.
+                    if (followingCursor.isNotEmpty()) {
+                        val px = cursor.x * width
+                        val py = cursor.y * height
+                        for (id in followingCursor) tapper.dragTo(id, px, py)
+                    }
                 }
                 continue
             }
