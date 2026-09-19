@@ -1,6 +1,7 @@
 package com.thorpad.app
 
 import android.app.Activity
+import android.content.Context
 import android.content.Intent
 import android.graphics.Color
 import android.net.Uri
@@ -41,6 +42,14 @@ class MainActivity : Activity() {
     private lateinit var cursorSize: Button
 
     private val ticker = Handler(Looper.getMainLooper())
+    private lateinit var mascot: MascotView
+
+    /** Where the tutorial has got to, or -1 when it is not running. */
+    private var tutorialStep = -1
+
+    private val prefs by lazy {
+        getSharedPreferences("thorpad", Context.MODE_PRIVATE)
+    }
     private val store by lazy { Store(this) }
 
     private val service: OverlayService? get() = OverlayService.instance
@@ -48,6 +57,9 @@ class MainActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(buildUi())
+        // Only unprompted the first time. A mascot that explains the app again
+        // every launch is a mascot you learn to dismiss without reading.
+        if (!prefs.getBoolean("tutorialSeen", false)) startTutorial()
     }
 
     override fun onResume() {
@@ -84,6 +96,16 @@ class MainActivity : Activity() {
             setPadding(dp(18), dp(16), dp(18), dp(28))
         }
 
+        mascot = MascotView(this).apply {
+            onTapped = { advanceTutorial() }
+        }
+        root.addView(
+            mascot,
+            LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply {
+                bottomMargin = dp(6)
+            },
+        )
+
         root.addView(heading("thorpad"))
         root.addView(
             note(
@@ -100,6 +122,7 @@ class MainActivity : Activity() {
         root.addView(status)
 
         root.addView(section("1 — permissions"))
+        root.addView(wide("Show me how") { startTutorial() })
         root.addView(wide("Accessibility settings") {
             startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
         })
@@ -143,6 +166,14 @@ class MainActivity : Activity() {
         val row = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         row.addView(button("Markers") {
             OverlayService.send(this, OverlayService.ACTION_MARKERS)
+            remark(
+                if (service?.markers == false) {
+                    "Circles hidden. The crosshair stays, and presses still " +
+                        "flash so you can see them land."
+                } else {
+                    "Circles back on."
+                }
+            )
             refresh()
         })
         row.addView(button("Stop controls") {
@@ -161,6 +192,11 @@ class MainActivity : Activity() {
         root.addView(section("crosshair"))
         sensitivity = wide("") {
             OverlayService.send(this, OverlayService.ACTION_SENSITIVITY)
+            val speed = service?.settings?.maxSpeed ?: 2.2f
+            remark(
+                "Crosshair at ${"%.1f".format(speed)} screens a second. " +
+                    "Remember it covers more ground when the game is zoomed."
+            )
             refresh()
         }
         root.addView(sensitivity)
@@ -181,6 +217,19 @@ class MainActivity : Activity() {
         root.addView(section("if a tap registers but nothing happens"))
         tapLength = wide("") {
             OverlayService.send(this, OverlayService.ACTION_TAP_LENGTH)
+            val ms = service?.tapMs ?: 140
+            remark(
+                when {
+                    ms <= 70 -> "70ms is about two frames at 30fps — quick, " +
+                        "and the first thing to blame if a button ignores you."
+                    ms <= 140 -> "140ms. A good default: long enough for most " +
+                        "games to count it as a real press."
+                    ms <= 240 -> "240ms. Try this if taps are landing but not " +
+                        "registering."
+                    else -> "400ms is a deliberate press. Slow, but hard for " +
+                        "a game to miss."
+                }
+            )
             refresh()
         }
         root.addView(tapLength)
@@ -196,6 +245,16 @@ class MainActivity : Activity() {
 
         holdJitter = wide("") {
             OverlayService.send(this, OverlayService.ACTION_JITTER)
+            val px = service?.holdJitter ?: 2f
+            remark(
+                if (px <= 0f) {
+                    "Perfectly still. Some games stop acting on a finger that " +
+                        "isn't moving, so if holding stops working, that's why."
+                } else {
+                    "${px.toInt()}px of drift while held — enough to count as " +
+                        "movement, nowhere near enough to drag anything."
+                }
+            )
             refresh()
         }
         root.addView(holdJitter)
@@ -211,6 +270,14 @@ class MainActivity : Activity() {
 
         duckToggle = wide("") {
             OverlayService.send(this, OverlayService.ACTION_DUCK)
+            remark(
+                if (service?.duck == true) {
+                    "I'll get out of the way while tapping. If that fixes a " +
+                        "dead button, the overlay was obscuring it."
+                } else {
+                    "Staying put while tapping."
+                }
+            )
             refresh()
         }
         root.addView(duckToggle)
@@ -303,10 +370,22 @@ class MainActivity : Activity() {
     /** Start it, or flip between editing and live. */
     private fun flipMode() {
         val running = service
+        val wasEditing = running?.editing == true
         if (running == null || !running.showing) {
             OverlayService.send(this, OverlayService.ACTION_START)
+            remark("Controls are up. Press a bound button and watch it flash.",
+                Mood.PLEASED)
         } else {
             OverlayService.send(this, OverlayService.ACTION_TOGGLE)
+            remark(
+                if (wasEditing) {
+                    "Live again — your buttons reach the game now."
+                } else {
+                    "Editing. Nothing I tap will reach the game until you're " +
+                        "done, because the overlay has to catch your finger."
+                },
+                if (wasEditing) Mood.PLEASED else Mood.TALKING,
+            )
         }
         mode.postDelayed({ refresh() }, 120)
     }
@@ -329,6 +408,11 @@ class MainActivity : Activity() {
                 OverlayService.send(this, OverlayService.ACTION_STOP)
                 OverlayService.send(this, OverlayService.ACTION_START)
                 hint.text = "Shizuku allowed. Sticks now read from /dev/input."
+                remark(
+                    "Sticks are coming off the kernel now — no focus taken, so " +
+                        "your game keeps its sound.",
+                    Mood.PLEASED,
+                )
             }
         }
         refresh()
@@ -341,7 +425,57 @@ class MainActivity : Activity() {
             return
         }
         running.focusAllowed = !running.focusAllowed
+        remark(
+            if (running.focusAllowed) {
+                "Careful — holding focus is how I see a stick below Android " +
+                    "14, but a game that loses focus usually mutes and pauses."
+            } else {
+                "Focus released. Buttons don't need it, so your game is left " +
+                    "alone."
+            },
+            if (running.focusAllowed) Mood.TALKING else Mood.PLEASED,
+        )
         refresh()
+    }
+
+    // ------------------------------------------------------------- mascot
+
+    private fun startTutorial() {
+        tutorialStep = 0
+        showTutorialStep()
+    }
+
+    private fun advanceTutorial() {
+        if (tutorialStep < 0) {
+            mascot.hide()
+            return
+        }
+        tutorialStep++
+        if (tutorialStep >= Tutorial.steps.size) {
+            tutorialStep = -1
+            prefs.edit().putBoolean("tutorialSeen", true).apply()
+            mascot.hide()
+            return
+        }
+        showTutorialStep()
+    }
+
+    private fun showTutorialStep() {
+        val step = Tutorial.steps[tutorialStep]
+        val counter = "${tutorialStep + 1}/${Tutorial.steps.size}  "
+        // Sticky: a tutorial step is finished by the reader, not by a timer.
+        mascot.say(counter + step.text, step.mood, sticky = true)
+    }
+
+    /**
+     * Has her comment on a change.
+     *
+     * Never while the tutorial is up — interrupting her own explanation to
+     * remark on a setting would lose whichever the reader was part-way through.
+     */
+    private fun remark(message: String, mood: Mood = Mood.TALKING) {
+        if (tutorialStep >= 0) return
+        mascot.say(message, mood)
     }
 
     private fun refresh() {

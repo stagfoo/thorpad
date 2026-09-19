@@ -115,6 +115,22 @@ is not something to be confident about from the outside, so **Overlay ducks
 while tapping** settles it by shrinking the window to a pixel for the length of
 the tap. If buttons start working with it on, that was the cause.
 
+## The mascot
+
+There is a vtuber in the corner. She runs the tutorial the first time the app
+opens — one step at a time, tapped through, because each step is a thing to go
+and do and a tutorial read all at once is finished before any of it is done.
+**Show me how** runs it again.
+
+After that she comments when a setting changes, saying what the change *means*
+rather than that it happened: the button already relabelled itself, so repeating
+it would be noise with a face on. Turning ducking on gets "if that fixes a dead
+button, the overlay was obscuring it"; taking focus for the sticks gets a
+warning that the game will probably mute.
+
+She keeps quiet during her own tutorial — interrupting an explanation to remark
+on a setting loses whichever the reader was part-way through.
+
 ## It shows its own working
 
 Every previous attempt at this failed silently somewhere in a chain nobody could
