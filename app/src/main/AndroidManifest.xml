@@ -16,6 +16,7 @@
     <application
         android:label="thorpad"
         android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
         android:theme="@android:style/Theme.Material"
         android:allowBackup="false"
         android:supportsRtl="true">

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Sampled from the picture's own corner, so whatever a mask leaves
+         at the edges matches rather than showing through. A colour rather
+         than five copies of a flat PNG. -->
+    <color name="ic_launcher_background">#048AFF</color>
+</resources>
