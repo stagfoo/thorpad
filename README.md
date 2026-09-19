@@ -212,6 +212,11 @@ worth having rather than a novelty: in a game where holding zooms and dragging
 aims, one finger has to do both. A hold that read the crosshair once at press
 time would zoom and then refuse to look around.
 
+The crosshair exists from the moment the controls come up, not from the first
+time the stick is nudged. Waiting for a nudge got the order backwards — you hold
+the trigger to zoom and *then* aim, so at the instant the trigger went down there
+was no crosshair to follow, the finger went down stationary, and it stayed there.
+
 **Crosshair speed** (0.8–4.5 screens a second) and **size** (small to huge) are
 both adjustable, because neither is knowable from outside the game you are
 pointing it at.

@@ -229,6 +229,9 @@ class OverlayService : Service() {
                 startForeground(NOTIFICATION, notification())
                 setMode(editing = false)
                 startSticks()
+                // Visible from the start rather than from the first nudge:
+                // an invisible crosshair reads as a broken one.
+                main.post { showCursorNow() }
             }
         }
         return START_STICKY
@@ -703,6 +706,10 @@ class OverlayService : Service() {
                         if (control.atCursor && cursorSpot() != null) {
                             followingCursor.add(control.id)
                             tapper.startDrag(control.id, x, y)
+                            // Drawn the moment it is being aimed by, so a
+                            // crosshair nobody has nudged yet is still visible
+                            // to aim with.
+                            showCursorNow()
                         } else {
                             tapper.startHold(control.id, x, y)
                         }
@@ -821,11 +828,37 @@ class OverlayService : Service() {
         }
     }
 
-    /** Where a button set to fire "at cursor" should aim, in fractions. */
+    /**
+     * Where a button set to fire "at cursor" should aim, in fractions.
+     *
+     * Creates the crosshair if the stick has not been touched yet. It used to
+     * wait for the first stick movement, which got the order exactly backwards:
+     * you hold the trigger to zoom and *then* aim, so at the moment the trigger
+     * went down there was no crosshair, the finger went down stationary, and it
+     * never followed. A bound crosshair has a position from the start now,
+     * centred in its own region.
+     */
     private fun cursorSpot(): Pair<Float, Float>? {
         val control = layout.cursor() ?: return null
-        val cursor = cursors[control.id] ?: return null
+        val cursor = cursors.getOrPut(control.id) {
+            CursorEngine(settings.within(control.region())).apply { centre() }
+        }
         return cursor.x to cursor.y
+    }
+
+    /** Puts the crosshair on screen as soon as there is one to show. */
+    private fun showCursorNow() {
+        val spot = cursorSpot() ?: return
+        view?.showCursor(spot.first, spot.second)
+        // Anything already held at it jumps to where it actually is, rather
+        // than staying wherever it was pressed.
+        if (followingCursor.isNotEmpty()) {
+            val bounds = view ?: return
+            val tapper = TapService.instance ?: return
+            for (id in followingCursor.toList()) {
+                tapper.dragTo(id, spot.first * bounds.width, spot.second * bounds.height)
+            }
+        }
     }
 
     private fun isFromPad(event: KeyEvent): Boolean {
