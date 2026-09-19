@@ -88,6 +88,9 @@ class StickClient(private val context: Context) {
     var report: String = "not connected"
         private set
 
+    /** Told when the reader's process goes away, so it can be started again. */
+    var onLost: (() -> Unit)? = null
+
     private val args = Shizuku.UserServiceArgs(
         ComponentName(context.packageName, StickService::class.java.name)
     )
@@ -110,6 +113,10 @@ class StickClient(private val context: Context) {
         override fun onServiceDisconnected(name: ComponentName?) {
             service = null
             report = "reader disconnected"
+            // Sleeping the device can take the reader's process with it, and
+            // nothing else would ever notice: the stick simply stops moving the
+            // crosshair and the app carries on looking fine.
+            onLost?.invoke()
         }
     }
 

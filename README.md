@@ -140,6 +140,27 @@ warning that the game will probably mute.
 She keeps quiet during her own tutorial — interrupting an explanation to remark
 on a setting loses whichever the reader was part-way through.
 
+## When it goes wrong
+
+**Last crash** shows the stack trace from the previous crash, with the top of it
+also leading Diagnose. This exists because several rounds went into guessing at
+a crash from a description of when it happened — a trace names the line, while
+"it crashed after sleep" names a moment, and those are very different amounts of
+information.
+
+Two things known to survive a sleep badly, both now guarded:
+
+- **A stuck duck.** A held control ducks the overlay with no timer and relies on
+  its key-up to bring it back. If that key-up never arrives — the screen slept
+  mid-hold, or the accessibility service was restarted under it — the overlay
+  stays one pixel wide and the crosshair is simply gone. There is a backstop now
+  at eight seconds, and the accessibility service forgets every held finger when
+  it reconnects, because a restart takes its gestures with it.
+- **A dead stick reader.** Sleeping can take the Shizuku process with it, and
+  nothing would notice: the stick just stops moving the crosshair. It is
+  restarted now, backed off and capped at five tries, since if Shizuku itself
+  has stopped then every attempt is a silent failure.
+
 ## It shows its own working
 
 Every previous attempt at this failed silently somewhere in a chain nobody could

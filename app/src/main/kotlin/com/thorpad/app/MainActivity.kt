@@ -59,7 +59,16 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        CrashLog.install(this)
         setContentView(buildUi())
+
+        // Surfaced rather than filed away: a crash nobody sees is a crash that
+        // gets described from memory next time.
+        CrashLog.lastCrash(this)?.let {
+            hint.text = "thorpad crashed last time. Tap 'Last crash' to see it."
+            status.text = "Recovered from a crash."
+            status.setTextColor(Color.parseColor("#E0725A"))
+        }
         // Only unprompted the first time. A mascot that explains the app again
         // every launch is a mascot you learn to dismiss without reading.
         if (!prefs.getBoolean("tutorialSeen", false)) startTutorial()
@@ -612,6 +621,7 @@ class MainActivity : Activity() {
             append("\nhold jitter: ").append((service?.holdJitter ?: 2f).toInt()).append("px")
             append(" · crosshair ").append("%.1f".format(speed)).append(" screens/s")
             append("\nstick route: ").append(route.label)
+            append("\nreader: ").append(service?.shellReport ?: "—")
             append("\nholding focus: ").append(if (stealing) "YES — game may mute" else "no")
             if (route == StickSource.SHIZUKU) {
                 append("\nreader: ").append(service?.shellReport ?: "—")

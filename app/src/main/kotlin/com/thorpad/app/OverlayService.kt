@@ -186,6 +186,7 @@ class OverlayService : Service() {
     override fun onCreate() {
         super.onCreate()
         instance = this
+        CrashLog.install(this)
         store = Store(this)
         focusAllowed = prefs.getBoolean("focusAllowed", false)
         tapMs = prefs.getLong("tapMs", 140)
@@ -206,7 +207,11 @@ class OverlayService : Service() {
             }
             ACTION_EDIT -> setMode(editing = true)
             ACTION_PLAY -> setMode(editing = false)
-            ACTION_TOGGLE -> setMode(editing = !editing)
+            ACTION_TOGGLE -> {
+                // Any duck belongs to the mode that is ending.
+                forgetHeld()
+                setMode(editing = !editing)
+            }
             ACTION_MARKERS -> {
                 markers = !markers
                 view?.showMarkers = markers
@@ -403,9 +408,36 @@ class OverlayService : Service() {
     private fun startSticks() {
         if (!layout.usesSticks) return
         if (source() != StickSource.SHIZUKU) return
+        sticks.onLost = { retrySticks() }
         val stick = layout.sticks().firstOrNull()?.stick ?: Stick.RIGHT
         sticks.start(stick, fromShell)
         shellReport = sticks.report
+    }
+
+    private var stickRetries = 0
+
+    /**
+     * Starts the reader again after its process went away.
+     *
+     * Backed off and capped rather than retried forever: if Shizuku itself has
+     * stopped, every attempt is a prompt-free failure, and a loop of those is
+     * just battery. The count resets whenever a start succeeds.
+     */
+    private fun retrySticks() {
+        if (stickRetries >= 5) {
+            shellReport = "reader kept going away; start Shizuku again"
+            return
+        }
+        val wait = 1500L * (stickRetries + 1)
+        stickRetries++
+        shellReport = "reader went away, retrying in ${wait / 1000}s"
+        main.postDelayed({
+            if (!sticks.connected) {
+                sticks.disconnect()
+                startSticks()
+                if (sticks.connected) stickRetries = 0
+            }
+        }, wait)
     }
 
     private fun stopSticks() {
@@ -487,6 +519,13 @@ class OverlayService : Service() {
     private fun duckAway(forMs: Long?) {
         val wm = manager ?: return
         val target = view ?: return
+        // A hold ducks with no timer and relies on its key-up to restore the
+        // window. If that key-up never arrives — the screen slept mid-hold, or
+        // the accessibility service was restarted under it — the overlay stays
+        // one pixel wide for ever and the crosshair is simply gone. So there is
+        // always a backstop, however the duck was asked for.
+        main.removeCallbacks(forceBack)
+        main.postDelayed(forceBack, MAX_DUCK_MS)
         // A second press while one is already ducked must not schedule a
         // restore of its own: the first one to come back would surface the
         // overlay under the other's finger.
@@ -525,6 +564,52 @@ class OverlayService : Service() {
     }
 
     @Volatile private var ducking = 0
+
+    /**
+     * Longest a duck may last before it is undone regardless.
+     *
+     * Nobody holds a trigger for eight seconds, and a stuck duck costs the
+     * whole overlay — the crosshair, the markers, everything.
+     */
+    private val MAX_DUCK_MS = 8000L
+
+    private val forceBack = Runnable {
+        if (ducked) {
+            ducking = 0
+            ducked = false
+            val back = view ?: return@Runnable
+            try {
+                manager?.updateViewLayout(back, params(editing))
+            } catch (e: Throwable) {
+                // The window went away underneath us; nothing to restore.
+            }
+        }
+    }
+
+    /**
+     * Forgets every finger the service thinks is down.
+     *
+     * Called when the thing that was holding them has been replaced — the
+     * accessibility service restarting takes its gestures with it, and holds
+     * recorded against the old one would never be released.
+     */
+    fun forgetHeld() {
+        holding.clear()
+        followingCursor.clear()
+        main.removeCallbacks(forceBack)
+        ducking = 0
+        if (ducked) forceBackNow()
+    }
+
+    private fun forceBackNow() {
+        ducked = false
+        val back = view ?: return
+        try {
+            manager?.updateViewLayout(back, params(editing))
+        } catch (e: Throwable) {
+            // Already gone.
+        }
+    }
 
     @Volatile private var ducked = false
     private val main = android.os.Handler(android.os.Looper.getMainLooper())

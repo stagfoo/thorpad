@@ -58,6 +58,11 @@ class TapService : AccessibilityService() {
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
+        CrashLog.install(this)
+        // A restart takes every gesture with it. Anything the overlay still
+        // thinks is held was held by a service that no longer exists, and its
+        // key-up would never release anything.
+        OverlayService.instance?.forgetHeld()
 
         // A global key hook, which is the clean way to see a gamepad while a
         // game is in front. The alternative — an overlay window that holds
