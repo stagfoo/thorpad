@@ -20,17 +20,20 @@ enum class Kind {
     /** A button that taps or holds one point. */
     BUTTON,
 
-    /** A stick that drags a finger around a region. */
-    STICK,
-
     /**
-     * A stick that moves a crosshair, injecting nothing until a button fires.
+     * A stick that moves a crosshair, injecting nothing on its own.
      *
-     * Much less to ask of a game than a drag — no stroke to run out of, no
-     * region edge, no recentring hitch — but it only helps if the game reads a
-     * tap where you put it rather than a finger travelling.
+     * There was a second stick kind that dragged a finger around instead. It
+     * worked, but it carried the whole recentring problem — a drag ends at the
+     * edge of its region and has to lift and start again — and the crosshair
+     * has none of that. Tested side by side on the device the crosshair won,
+     * so the drag is gone rather than kept as a worse option to pick by
+     * mistake.
      */
     CURSOR,
+
+    /** Only ever read from an older saved layout; becomes [CURSOR] on load. */
+    STICK,
 }
 
 /** Which stick drives a [Kind.STICK] control. */
@@ -78,9 +81,9 @@ data class Control(
         y = ny.coerceIn(0f, 1f),
     )
 
-    val isStick: Boolean get() = kind == Kind.STICK || kind == Kind.CURSOR
+    val isStick: Boolean get() = kind == Kind.CURSOR || kind == Kind.STICK
 
-    val isCursor: Boolean get() = kind == Kind.CURSOR
+    val isCursor: Boolean get() = isStick
 
     val isButton: Boolean get() = kind == Kind.BUTTON
 
@@ -136,7 +139,12 @@ data class Control(
                     Press.valueOf(json.optString("press", "TAP"))
                 }.getOrDefault(Press.TAP),
                 kind = runCatching {
-                    Kind.valueOf(json.optString("kind", "BUTTON"))
+                    // A layout saved when dragging existed keeps working: the
+                    // stick it was bound to now moves a crosshair instead.
+                    when (Kind.valueOf(json.optString("kind", "BUTTON"))) {
+                        Kind.STICK -> Kind.CURSOR
+                        else -> Kind.valueOf(json.optString("kind", "BUTTON"))
+                    }
                 }.getOrDefault(Kind.BUTTON),
                 stick = runCatching {
                     json.optString("stick").takeIf { it.isNotEmpty() }
@@ -195,10 +203,7 @@ data class Layout(val controls: List<Control> = emptyList()) {
                     // Keeps whichever stick kind it already was: changing a
                     // crosshair into a drag because its stick was reassigned
                     // would be a surprise.
-                    it.id == id -> it.copy(
-                        stick = stick,
-                        kind = if (it.isStick) it.kind else Kind.STICK,
-                    )
+                    it.id == id -> it.copy(stick = stick, kind = Kind.CURSOR)
                     it.isStick && it.stick == stick -> it.copy(stick = null)
                     else -> it
                 }

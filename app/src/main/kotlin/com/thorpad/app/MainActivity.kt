@@ -14,8 +14,11 @@ import android.view.View
 import android.view.ViewGroup.LayoutParams.MATCH_PARENT
 import android.view.ViewGroup.LayoutParams.WRAP_CONTENT
 import android.widget.Button
+import android.view.Gravity
+import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import android.widget.SeekBar
 import android.widget.TextView
 import kotlin.math.roundToInt
 
@@ -35,11 +38,11 @@ class MainActivity : Activity() {
     private lateinit var mode: Button
     private var focusToggle: Button? = null
     private var stickRoute: TextView? = null
-    private lateinit var tapLength: Button
     private lateinit var duckToggle: Button
-    private lateinit var holdJitter: Button
-    private lateinit var sensitivity: Button
-    private lateinit var cursorSize: Button
+    private lateinit var tapLength: View
+    private lateinit var holdJitter: View
+    private lateinit var sensitivity: View
+    private lateinit var cursorSize: View
 
     private val ticker = Handler(Looper.getMainLooper())
     private lateinit var mascot: MascotView
@@ -95,16 +98,6 @@ class MainActivity : Activity() {
             setBackgroundColor(Color.parseColor("#0E1013"))
             setPadding(dp(18), dp(16), dp(18), dp(28))
         }
-
-        mascot = MascotView(this).apply {
-            onTapped = { advanceTutorial() }
-        }
-        root.addView(
-            mascot,
-            LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply {
-                bottomMargin = dp(6)
-            },
-        )
 
         root.addView(heading("thorpad"))
         root.addView(
@@ -190,18 +183,27 @@ class MainActivity : Activity() {
         )
 
         root.addView(section("crosshair"))
-        sensitivity = wide("") {
-            OverlayService.send(this, OverlayService.ACTION_SENSITIVITY)
-            val speed = service?.settings?.maxSpeed ?: 2.2f
+        sensitivity = slider(
+            "Crosshair speed",
+            OverlayService.SENSITIVITY_RANGE,
+            service?.settings?.maxSpeed ?: 2.2f,
+            { "%.1f screens/sec".format(it) },
+        ) { value ->
+            OverlayService.send(this, OverlayService.ACTION_SENSITIVITY, value)
             remark(
-                "Crosshair at ${"%.1f".format(speed)} screens a second. " +
-                    "Remember it covers more ground when the game is zoomed."
+                "%.1f screens a second. Remember it covers more ground when " .format(value) +
+                    "the game is zoomed in."
             )
             refresh()
         }
         root.addView(sensitivity)
-        cursorSize = wide("") {
-            OverlayService.send(this, OverlayService.ACTION_CURSOR_SIZE)
+        cursorSize = slider(
+            "Crosshair size",
+            OverlayService.CURSOR_SIZE_RANGE,
+            service?.cursorSize ?: 0.035f,
+            { "%.0f%% of the screen".format(it * 100) },
+        ) { value ->
+            OverlayService.send(this, OverlayService.ACTION_CURSOR_SIZE, value)
             refresh()
         }
         root.addView(cursorSize)
@@ -215,19 +217,23 @@ class MainActivity : Activity() {
         )
 
         root.addView(section("if a tap registers but nothing happens"))
-        tapLength = wide("") {
-            OverlayService.send(this, OverlayService.ACTION_TAP_LENGTH)
-            val ms = service?.tapMs ?: 140
+        tapLength = slider(
+            "Tap length",
+            OverlayService.TAP_MS_RANGE,
+            (service?.tapMs ?: 140L).toFloat(),
+            { "${it.toInt()}ms" },
+        ) { value ->
+            OverlayService.send(this, OverlayService.ACTION_TAP_MS, value)
             remark(
                 when {
-                    ms <= 70 -> "70ms is about two frames at 30fps — quick, " +
+                    value <= 70f -> "That's about two frames at 30fps. Quick — " +
                         "and the first thing to blame if a button ignores you."
-                    ms <= 140 -> "140ms. A good default: long enough for most " +
+                    value <= 180f -> "${value.toInt()}ms. Long enough for most " +
                         "games to count it as a real press."
-                    ms <= 240 -> "240ms. Try this if taps are landing but not " +
-                        "registering."
-                    else -> "400ms is a deliberate press. Slow, but hard for " +
-                        "a game to miss."
+                    value <= 320f -> "${value.toInt()}ms — worth trying if taps " +
+                        "land but don't register."
+                    else -> "${value.toInt()}ms is a deliberate press. Slow, " +
+                        "but hard for a game to miss."
                 }
             )
             refresh()
@@ -243,16 +249,20 @@ class MainActivity : Activity() {
             )
         )
 
-        holdJitter = wide("") {
-            OverlayService.send(this, OverlayService.ACTION_JITTER)
-            val px = service?.holdJitter ?: 2f
+        holdJitter = slider(
+            "Held finger drift",
+            OverlayService.JITTER_RANGE,
+            service?.holdJitter ?: 2f,
+            { if (it < 0.5f) "perfectly still" else "${it.toInt()}px" },
+        ) { value ->
+            OverlayService.send(this, OverlayService.ACTION_JITTER, value)
             remark(
-                if (px <= 0f) {
+                if (value < 0.5f) {
                     "Perfectly still. Some games stop acting on a finger that " +
-                        "isn't moving, so if holding stops working, that's why."
+                        "isn't moving — if holding stops working, that's why."
                 } else {
-                    "${px.toInt()}px of drift while held — enough to count as " +
-                        "movement, nowhere near enough to drag anything."
+                    "${value.toInt()}px of drift while held. Movement, but " +
+                        "nowhere near enough to drag anything."
                 }
             )
             refresh()
@@ -331,16 +341,13 @@ class MainActivity : Activity() {
 
         val adders = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         adders.addView(button("Button") { addControl() })
-        adders.addView(button("Stick (drag)") { addStick(Kind.STICK) })
-        adders.addView(button("Stick (crosshair)") { addStick(Kind.CURSOR) })
+        adders.addView(button("Crosshair stick") { addStick(Kind.CURSOR) })
         root.addView(adders)
         root.addView(
             note(
-                "A button taps one point. A drag stick pulls a finger around " +
-                    "the screen. A crosshair stick injects nothing at all — it " +
-                    "just moves a marker, and a button set to 'at crosshair' " +
-                    "taps wherever it is. Which one a game understands is worth " +
-                    "finding out rather than guessing."
+                "A button taps one point. A crosshair stick moves a marker " +
+                    "and injects nothing on its own — a button set to ✛ on " +
+                    "touches wherever the marker is, and follows it while held."
             )
         )
         root.addView(
@@ -364,7 +371,33 @@ class MainActivity : Activity() {
         }
         root.addView(hint)
 
-        return ScrollView(this).apply { addView(root) }
+        mascot = MascotView(this).apply {
+            onTapped = { advanceTutorial() }
+        }
+
+        // Over the page rather than in it: she has to stay put while the
+        // settings she is talking about scroll past behind her, and a mascot
+        // that scrolls away mid-sentence is a mascot nobody finishes reading.
+        return FrameLayout(this).apply {
+            addView(
+                ScrollView(this@MainActivity).apply {
+                    addView(root)
+                    // Room at the bottom so she never sits on the last control.
+                    clipToPadding = false
+                    setPadding(0, 0, 0, dp(140))
+                },
+                FrameLayout.LayoutParams(MATCH_PARENT, MATCH_PARENT),
+            )
+            addView(
+                mascot,
+                FrameLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT).apply {
+                    gravity = Gravity.BOTTOM or Gravity.END
+                    marginStart = dp(12)
+                    marginEnd = dp(8)
+                    bottomMargin = dp(4)
+                },
+            )
+        }
     }
 
     /** Start it, or flip between editing and live. */
@@ -505,23 +538,6 @@ class MainActivity : Activity() {
         )
 
         val speed = service?.settings?.maxSpeed ?: 2.2f
-        sensitivity.text = "Crosshair speed: ${"%.1f".format(speed)} screens/sec" +
-            "  —  tap to change"
-        val size = service?.cursorSize ?: 0.035f
-        cursorSize.text = "Crosshair size: " + when {
-            size <= 0.02f -> "small"
-            size <= 0.04f -> "medium"
-            size <= 0.07f -> "large"
-            else -> "huge"
-        } + "  —  tap to change"
-
-        tapLength.text = "Tap length: ${service?.tapMs ?: 140}ms  —  tap to change"
-        val jitter = service?.holdJitter ?: 2f
-        holdJitter.text = if (jitter <= 0f) {
-            "Held finger: perfectly still  —  tap to change"
-        } else {
-            "Held finger drifts ${jitter.toInt()}px  —  tap to change"
-        }
         duckToggle.text = if (service?.duck == true) {
             "Overlay ducks while tapping: ON"
         } else {
@@ -826,6 +842,56 @@ class MainActivity : Activity() {
         textSize = 11f
         layoutParams = LinearLayout.LayoutParams(WRAP_CONTENT, WRAP_CONTENT)
         setOnClickListener { onClick() }
+    }
+
+    /**
+     * A labelled slider with its value shown above it.
+     *
+     * SeekBar is integers only, so the range is stepped into a thousand and
+     * converted either way — every one of these is a value found by feel, and
+     * one that could only be set in whole units would not be a setting.
+     */
+    private fun slider(
+        label: String,
+        range: ClosedFloatingPointRange<Float>,
+        value: Float,
+        format: (Float) -> String,
+        onChange: (Float) -> Unit,
+    ): View {
+        val steps = 1000
+        val box = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, dp(8), 0, dp(2))
+        }
+
+        val readout = TextView(this).apply {
+            setTextColor(Color.parseColor("#D7DEE5"))
+            textSize = 13f
+            text = "$label   ${format(value)}"
+        }
+        box.addView(readout)
+
+        box.addView(SeekBar(this).apply {
+            max = steps
+            val span = range.endInclusive - range.start
+            progress = (((value - range.start) / span) * steps)
+                .coerceIn(0f, steps.toFloat()).roundToInt()
+            layoutParams = LinearLayout.LayoutParams(MATCH_PARENT, WRAP_CONTENT)
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(bar: SeekBar?, p: Int, fromUser: Boolean) {
+                    readout.text = "$label   ${format(range.start + span * p / steps)}"
+                }
+                override fun onStartTrackingTouch(bar: SeekBar?) = Unit
+                // Only on release: sending on every pixel of travel would be a
+                // few hundred service calls a second for a value nobody has
+                // settled on yet.
+                override fun onStopTrackingTouch(bar: SeekBar?) {
+                    onChange(range.start + span * progress / steps)
+                }
+            })
+        })
+
+        return box
     }
 
     private fun wide(text: String, onClick: () -> Unit) = Button(this).apply {

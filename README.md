@@ -105,8 +105,12 @@ guessed at.
 can have its press and release land inside the same one, so the engine sees a
 finger appear and vanish with no press in between — the touch registers plainly
 (a ripple, a glow) and the button under it does nothing. At 30fps a frame is
-33ms, which is why the original 60ms was never a safe number. Default is now
-140ms, cycling 70 / 140 / 240 / 400.
+33ms, which is why the original 60ms was never a safe number. 40–600ms on a
+slider, defaulting to 140.
+
+Every tuning value here is a continuous slider rather than a few steps. They are
+all found by feel against a particular game, and a step landing either side of
+the number you wanted is worse than no step at all.
 
 **Obscured touches.** Android marks a touch as obscured when another app's
 window sits above the point it landed on, and a view can be set to refuse
@@ -117,8 +121,13 @@ the tap. If buttons start working with it on, that was the cause.
 
 ## The mascot
 
-There is a vtuber in the corner. She runs the tutorial the first time the app
-opens — one step at a time, tapped through, because each step is a thing to go
+There is a vtuber standing in the bottom-right corner, a quarter of the screen
+tall — big enough that her face is doing the work an expression is for, since at
+thumbnail size the three moods are indistinguishable. She sits over the page
+rather than in it, so she stays put while the settings she is talking about
+scroll past behind her.
+
+She runs the tutorial the first time the app opens — one step at a time, tapped through, because each step is a thing to go
 and do and a tutorial read all at once is finished before any of it is done.
 **Show me how** runs it again.
 
@@ -163,18 +172,19 @@ one button cannot drive two controls, a control cannot be dragged off screen, a
 sweep covers most of the screen before it hitches — are tested without a device.
 30 tests.
 
-## Two ways to use a stick
+## The crosshair stick
 
-Which one a game understands is not something that can be settled from outside
-it, so both are here.
+A crosshair stick moves a marker and injects nothing on its own. A button set to
+**✛ on** touches wherever the marker is — and **follows it while held**, so one
+finger holds and aims. That is what a game wants when holding zooms and dragging
+looks around.
 
-**Stick (drag)** pulls a finger around the screen, which is what a game that
-tracks a travelling touch reads for aiming. The dashed rectangle on the overlay
-is where the finger may go.
-
-**Stick (crosshair)** injects nothing on its own. It moves a marker, and a
-button set to **✛ on** touches wherever that marker is. Far less to ask of a
-game — no stroke to run out of, no region edge, no recentring hitch.
+There was a second stick kind that dragged a finger around the screen directly.
+It worked, and it carried the whole recentring problem with it: a drag ends at
+the edge of its region and has to lift and start again. Tested side by side on
+the device, the crosshair won, so the drag is gone rather than left in as a
+worse option to pick by mistake. A layout that used one loads as a crosshair on
+the same stick.
 
 **A button held at the crosshair follows it.** That is what makes the crosshair
 worth having rather than a novelty: in a game where holding zooms and dragging

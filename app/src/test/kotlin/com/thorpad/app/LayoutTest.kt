@@ -114,7 +114,7 @@ class LayoutTest {
 
     private fun stick(id: String, s: Stick? = null, x: Float = 0.5f, y: Float = 0.5f) =
         Control(id = id, label = id, keyCode = 0, x = x, y = y,
-            kind = Kind.STICK, stick = s)
+            kind = Kind.CURSOR, stick = s)
 
     @Test fun `a stick control is bound by a stick, not a key`() {
         val layout = Layout().add(stick("aim", Stick.RIGHT))
@@ -191,7 +191,7 @@ class LayoutTest {
         )
         val restored = Layout.fromJson(layout.toJson())["aim"]!!
 
-        assertEquals(Kind.STICK, restored.kind)
+        assertEquals(Kind.CURSOR, restored.kind)
         assertEquals(Stick.RIGHT, restored.stick)
         assertEquals(0.8f, restored.width, 0.001f)
     }
@@ -219,11 +219,17 @@ class LayoutTest {
         assertEquals("aim", layout.cursor()?.id)
     }
 
-    @Test fun `a drag stick is not offered as a crosshair`() {
-        // A button set to fire "at crosshair" needs somewhere to aim, and a
-        // dragging finger is not a crosshair.
-        val layout = Layout().add(stick("aim", Stick.RIGHT))
-        assertNull(layout.cursor())
+    @Test fun `a layout saved when dragging existed keeps working`() {
+        // The drag kind is gone, but a layout that used it must not come back
+        // with a stick bound to nothing. It becomes a crosshair on the same
+        // stick, which is the thing that replaced it.
+        val old = Layout.fromJson(
+            """[{"id":"aim","label":"aim","keyCode":0,"x":0.5,"y":0.5,""" +
+            """"kind":"STICK","stick":"RIGHT"}]"""
+        )
+        assertEquals(Kind.CURSOR, old["aim"]!!.kind)
+        assertEquals(Stick.RIGHT, old["aim"]!!.stick)
+        assertEquals("aim", old.cursor()?.id)
     }
 
     @Test fun `an unbound crosshair is not offered either`() {
@@ -233,7 +239,7 @@ class LayoutTest {
         assertNull(layout.cursor())
     }
 
-    @Test fun `reassigning a stick does not turn a crosshair into a drag`() {
+    @Test fun `reassigning a stick keeps it a crosshair`() {
         var layout = Layout().add(
             Control("aim", "aim", 0, 0.5f, 0.5f, kind = Kind.CURSOR, stick = Stick.LEFT)
         )

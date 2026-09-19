@@ -164,20 +164,30 @@ class MascotView @JvmOverloads constructor(
 
     init {
         orientation = HORIZONTAL
+        // Bottom-aligned so she stands on the corner and the bubble floats
+        // beside her head rather than her being pinned to the bubble's top.
         gravity = android.view.Gravity.BOTTOM
 
         bubble.tailOnRight = true
         addView(
             bubble,
             LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f).apply {
-                bottomMargin = dp(28)
-                marginEnd = dp(2)
+                bottomMargin = dp(40)
+                marginEnd = dp(4)
             },
         )
 
         portrait.adjustViewBounds = true
+        portrait.scaleType = ImageView.ScaleType.FIT_END
         portrait.setImageResource(Mood.CALM.drawable)
-        addView(portrait, LayoutParams(dp(96), LayoutParams.WRAP_CONTENT))
+        // A quarter of the screen's shorter side. Big enough that the face is
+        // doing the work an expression is for — at a thumbnail she is a smudge
+        // with a hairstyle, and the three moods are indistinguishable.
+        val short = minOf(
+            resources.displayMetrics.widthPixels,
+            resources.displayMetrics.heightPixels,
+        )
+        addView(portrait, LayoutParams((short * 0.25f).toInt(), LayoutParams.WRAP_CONTENT))
 
         portrait.setOnClickListener { onTapped?.invoke() }
         bubble.setOnClickListener { onTapped?.invoke() }

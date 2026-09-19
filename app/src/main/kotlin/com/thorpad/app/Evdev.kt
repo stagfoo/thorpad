@@ -192,7 +192,17 @@ class AxisRange(var minimum: Int = -32768, var maximum: Int = 32767) {
         }
     }
 
-    fun normalise(raw: Int): Float = AimEngine.normalise(raw, minimum, maximum)
+    fun normalise(raw: Int): Float = normalise(raw, minimum, maximum)
+
+    companion object {
+        /** A raw axis reading as -1..1, given the range the device reports. */
+        fun normalise(raw: Int, minimum: Int, maximum: Int): Float {
+            if (maximum <= minimum) return 0f
+            val mid = (minimum + maximum) / 2.0
+            val half = (maximum - minimum) / 2.0
+            return ((raw - mid) / half).coerceIn(-1.0, 1.0).toFloat()
+        }
+    }
 
     override fun toString(): String =
         "$minimum..$maximum${if (known) "" else " (assumed)"}"

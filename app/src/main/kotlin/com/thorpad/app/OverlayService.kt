@@ -44,14 +44,11 @@ class OverlayService : Service() {
         /** Show or hide the control markers, without touching the crosshair. */
         const val ACTION_MARKERS = "markers"
 
-        /** Cycles how long a tap presses for. */
-        const val ACTION_TAP_LENGTH = "tap-length"
+        /** Sets how long a tap presses for, in ms, via [EXTRA_VALUE]. */
+        const val ACTION_TAP_MS = "tap-ms"
 
         /** Cycles how far a held finger wanders. */
         const val ACTION_JITTER = "jitter"
-
-        /** Pixels a held finger drifts each segment. 0 is as still as it gets. */
-        val JITTERS = floatArrayOf(0f, 2f, 5f, 10f)
 
         /** Cycles how fast the crosshair moves. */
         const val ACTION_SENSITIVITY = "sensitivity"
@@ -59,31 +56,28 @@ class OverlayService : Service() {
         /** Cycles how big the crosshair is drawn. */
         const val ACTION_CURSOR_SIZE = "cursor-size"
 
-        /** Screen widths a second at full tilt. */
-        val SENSITIVITIES = floatArrayOf(0.8f, 1.4f, 2.2f, 3.2f, 4.5f)
-
-        /** Crosshair radius as a fraction of the screen's short side. */
-        val CURSOR_SIZES = floatArrayOf(0.018f, 0.035f, 0.06f, 0.09f)
-
         /** Get the overlay out of the way while a tap lands. */
         const val ACTION_DUCK = "duck"
 
-        /**
-         * The lengths worth trying, in ms.
-         *
-         * Two frames at 30fps is the floor for a game to see a press at all;
-         * the longer ones are for engines that want a touch to settle before
-         * they count it.
-         */
-        val TAP_LENGTHS = longArrayOf(70, 140, 240, 400)
+        /** Carries a slider's value alongside its action. */
+        const val EXTRA_VALUE = "value"
+
+        // Continuous ranges rather than a few steps. Every one of these is
+        // found by feel against a particular game, and a step that lands either
+        // side of the number you wanted is worse than no step at all.
+        val TAP_MS_RANGE = 40f..600f
+        val JITTER_RANGE = 0f..14f
+        val SENSITIVITY_RANGE = 0.4f..6f
+        val CURSOR_SIZE_RANGE = 0.012f..0.11f
 
         private const val CHANNEL = "thorpad"
         private const val NOTIFICATION = 1
 
         fun canDraw(context: Context): Boolean = Settings.canDrawOverlays(context)
 
-        fun send(context: Context, action: String) {
+        fun send(context: Context, action: String, value: Float? = null) {
             val intent = Intent(context, OverlayService::class.java).setAction(action)
+            if (value != null) intent.putExtra(EXTRA_VALUE, value)
             if (action == ACTION_START) {
                 context.startForegroundService(intent)
             } else {
@@ -218,24 +212,10 @@ class OverlayService : Service() {
                 view?.showMarkers = markers
                 refreshNotification()
             }
-            ACTION_TAP_LENGTH -> {
-                val next = (TAP_LENGTHS.indexOf(tapMs) + 1) % TAP_LENGTHS.size
-                tapMs = TAP_LENGTHS[next]
-            }
-            ACTION_SENSITIVITY -> {
-                val at = SENSITIVITIES.indexOfFirst { it == settings.maxSpeed }
-                val next = SENSITIVITIES[(if (at < 0) 1 else at + 1) % SENSITIVITIES.size]
-                settings = settings.copy(maxSpeed = next)
-                prefs.edit().putFloat("sensitivity", next).apply()
-            }
-            ACTION_CURSOR_SIZE -> {
-                val at = CURSOR_SIZES.indexOfFirst { it == cursorSize }
-                cursorSize = CURSOR_SIZES[(if (at < 0) 1 else at + 1) % CURSOR_SIZES.size]
-            }
-            ACTION_JITTER -> {
-                val at = JITTERS.indexOfFirst { it == holdJitter }
-                holdJitter = JITTERS[(if (at < 0) 0 else at + 1) % JITTERS.size]
-            }
+            ACTION_SENSITIVITY -> setSensitivity(intent.getFloatExtra(EXTRA_VALUE, 2.2f))
+            ACTION_CURSOR_SIZE -> cursorSize = intent.getFloatExtra(EXTRA_VALUE, 0.035f)
+            ACTION_JITTER -> holdJitter = intent.getFloatExtra(EXTRA_VALUE, 2f)
+            ACTION_TAP_MS -> tapMs = intent.getFloatExtra(EXTRA_VALUE, 140f).toLong()
             ACTION_DUCK -> {
                 duck = !duck
                 prefs.edit().putBoolean("duck", duck).apply()
@@ -253,6 +233,12 @@ class OverlayService : Service() {
         teardown()
         instance = null
         super.onDestroy()
+    }
+
+    fun setSensitivity(value: Float) {
+        val clamped = value.coerceIn(SENSITIVITY_RANGE.start, SENSITIVITY_RANGE.endInclusive)
+        settings = settings.copy(maxSpeed = clamped)
+        prefs.edit().putFloat("sensitivity", clamped).apply()
     }
 
     private fun moveControl(id: String, x: Float, y: Float) {
@@ -393,7 +379,16 @@ class OverlayService : Service() {
      */
     private val fromShell = object : IStickCallback.Stub() {
         override fun onStick(x: Float, y: Float) {
-            onStickValues(x, y)
+            // Posted rather than handled here. This arrives on a Binder thread,
+            // while key events arrive on the main one — and both touch the same
+            // maps of who is held, who is following the crosshair and which
+            // controls are lit. Two threads walking one HashMap is a crash, and
+            // it was: pressing a button while the stick was moving threw from
+            // inside the iteration.
+            //
+            // One thread for all of it beats a concurrent collection per field,
+            // because the next thing added would have to remember the rule too.
+            main.post { onStickValues(x, y) }
         }
 
         override fun onFailed(why: String?) {
@@ -541,7 +536,6 @@ class OverlayService : Service() {
         while (ducking > 0) unduck()
         holding.clear()
         followingCursor.clear()
-        aim.clear()
         cursors.clear()
         stopSticks()
         val wm = manager
@@ -644,7 +638,6 @@ class OverlayService : Service() {
 
     // ------------------------------------------------------------- sticks
 
-    private val aim = mutableMapOf<String, AimEngine>()
     private val cursors = mutableMapOf<String, CursorEngine>()
     private var lastTick = 0L
 
@@ -721,10 +714,9 @@ class OverlayService : Service() {
         for (control in sticksBound) {
             val tuned = settings.within(control.region())
 
-            if (control.isCursor) {
-                // Nothing is injected here at all. The crosshair moves, and a
-                // button firing "at cursor" is what eventually touches the
-                // screen — which is the whole point of this kind.
+            // Nothing is injected by the stick itself. The crosshair moves,
+            // and a button firing "at cursor" is what touches the screen.
+            run {
                 val cursor = cursors.getOrPut(control.id) {
                     CursorEngine(tuned).apply { centre() }
                 }
@@ -736,34 +728,11 @@ class OverlayService : Service() {
                     if (followingCursor.isNotEmpty()) {
                         val px = cursor.x * width
                         val py = cursor.y * height
-                        for (id in followingCursor) tapper.dragTo(id, px, py)
+                        for (id in followingCursor.toList()) tapper.dragTo(id, px, py)
                     }
                 }
-                continue
             }
 
-            val engine = aim.getOrPut(control.id) { AimEngine(tuned) }
-            engine.reconfigure(tuned)
-
-            val step = engine.step(sx, sy, dt, now)
-            val px = step.x * width
-            val py = step.y * height
-
-            when (step.action) {
-                AimEngine.Action.PRESS -> {
-                    view?.flash(control.id)
-                    tapper.startDrag(control.id, px, py)
-                }
-                AimEngine.Action.MOVE -> tapper.dragTo(control.id, px, py)
-                AimEngine.Action.LIFT -> tapper.releaseHold(control.id)
-                AimEngine.Action.RESTART -> {
-                    // Out of screen to drag across: lift, go back to the far
-                    // side and press again. The hitch on a long sweep.
-                    tapper.releaseHold(control.id)
-                    tapper.startDrag(control.id, px, py)
-                }
-                AimEngine.Action.NONE -> Unit
-            }
         }
     }
 
