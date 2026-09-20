@@ -181,6 +181,9 @@ class OverlayService : Service() {
     /** Set while the UI is waiting for a button to bind to a control. */
     @Volatile var learningFor: String? = null
 
+    /** Whether that binding is a strip's backwards direction. */
+    @Volatile var learningPrev: Boolean = false
+
     var onLearned: ((String, Int) -> Unit)? = null
     var onChanged: (() -> Unit)? = null
 
@@ -308,6 +311,10 @@ class OverlayService : Service() {
             onMoved = ::moveControl
             onPicked = { id ->
                 selectedId = id
+                // Tapping a control on the overlay always arms its main
+                // binding; a strip's backwards direction is set from the app,
+                // where there is room to say which is which.
+                this@OverlayService.learningPrev = false
                 // Picking a control in edit mode arms it: the next gamepad
                 // button pressed binds to it. All the editing happens here,
                 // over the game, so going back to the app to bind was the
@@ -608,6 +615,7 @@ class OverlayService : Service() {
     fun forgetHeld() {
         holding.clear()
         followingCursor.clear()
+        stripAt.clear()
         main.removeCallbacks(forceBack)
         ducking = 0
         if (ducked) forceBackNow()
@@ -633,6 +641,7 @@ class OverlayService : Service() {
         while (ducking > 0) unduck()
         holding.clear()
         followingCursor.clear()
+        stripAt.clear()
         cursors.clear()
         drags.clear()
         stopSticks()
@@ -670,10 +679,24 @@ class OverlayService : Service() {
         val learning = learningFor
         if (learning != null && event.action == KeyEvent.ACTION_DOWN) {
             learningFor = null
-            val bound = layout.bind(learning, event.keyCode)
+            val bound = if (learningPrev) {
+                layout.bindPrev(learning, event.keyCode)
+            } else {
+                layout.bind(learning, event.keyCode)
+            }
+            learningPrev = false
             update(bound)
             view?.flash(learning)
             onLearned?.invoke(learning, event.keyCode)
+            return true
+        }
+
+        // A strip is checked first: its buttons are bindings on a control that
+        // is not a plain button, so forKey deliberately does not find them.
+        layout.stripFor(event.keyCode)?.let { (strip, delta) ->
+            if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+                stepStrip(strip, delta)
+            }
             return true
         }
 
@@ -866,6 +889,32 @@ class OverlayService : Service() {
             }
 
         }
+    }
+
+    /** Which slot each strip is on, or -1 for nothing chosen yet. */
+    private val stripAt = mutableMapOf<String, Int>()
+
+    /**
+     * Moves a strip one slot and taps it.
+     *
+     * The tap is the whole point — stepping a marker around without touching
+     * anything would leave the game exactly where it was.
+     */
+    private fun stepStrip(control: Control, delta: Int) {
+        val tapper = TapService.instance ?: return
+        val bounds = view ?: return
+        if (bounds.width <= 0 || bounds.height <= 0) return
+
+        val next = Strip.step(stripAt[control.id] ?: -1, delta, control.slots)
+        stripAt[control.id] = next
+
+        val points = Strip.slotPoints(control)
+        val point = points.getOrNull(next) ?: return
+
+        bounds.showStrip(control.id, next)
+        if (duck) duckAway(tapMs + 80)
+        tapper.tapMs = tapMs
+        tapper.tap(point.first * bounds.width, point.second * bounds.height)
     }
 
     /**

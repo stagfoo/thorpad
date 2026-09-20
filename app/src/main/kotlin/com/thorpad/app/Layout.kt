@@ -33,6 +33,15 @@ enum class Kind {
     CURSOR,
 
     /**
+     * A row or column of slots that two buttons step through.
+     *
+     * For a bar the game expects you to poke directly — a squad along the
+     * bottom, a belt of items. There is no button in the game to bind to, only
+     * places to tap, so this turns them into one axis.
+     */
+    STRIP,
+
+    /**
      * A stick held as a finger offset from where it pressed.
      *
      * How the mappers that work do it: the game turns because the finger is
@@ -79,6 +88,12 @@ data class Control(
      * decision rather than a consequence of centring the stick.
      */
     val releasesAim: Boolean = false,
+    /** For a strip: the button that steps backwards through the slots. */
+    val keyCodePrev: Int = 0,
+    /** For a strip: how many slots it is divided into. */
+    val slots: Int = 5,
+    /** For a strip: down the screen rather than across it. */
+    val vertical: Boolean = false,
     /**
      * For a stick, how much of the screen the finger may drag across, as
      * fractions of it.
@@ -101,11 +116,19 @@ data class Control(
 
     val isDragStick: Boolean get() = kind == Kind.STICK
 
+    val isStrip: Boolean get() = kind == Kind.STRIP
+
     val isButton: Boolean get() = kind == Kind.BUTTON
 
     /** A button needs a key; a stick needs a stick. */
     val bound: Boolean
-        get() = if (isStick) stick != null else keyCode != 0
+        get() = when {
+            isStick -> stick != null
+            // One direction is enough to be useful: a three-slot strip you only
+            // ever cycle forward through needs one shoulder button, not two.
+            isStrip -> keyCode != 0 || keyCodePrev != 0
+            else -> keyCode != 0
+        }
 
     /** The region this stick may drag in, clamped to the screen. */
     fun region(): AimSettings.Region {
@@ -139,6 +162,9 @@ data class Control(
         stick?.let { put("stick", it.name) }
         put("atCursor", atCursor)
         put("releasesAim", releasesAim)
+        if (keyCodePrev != 0) put("keyCodePrev", keyCodePrev)
+        put("slots", slots)
+        put("vertical", vertical)
         put("width", width.toDouble())
         put("height", height.toDouble())
     }
@@ -164,6 +190,9 @@ data class Control(
                 }.getOrNull(),
                 atCursor = json.optBoolean("atCursor", false),
                 releasesAim = json.optBoolean("releasesAim", false),
+                keyCodePrev = json.optInt("keyCodePrev", 0),
+                slots = json.optInt("slots", 5).coerceIn(2, 12),
+                vertical = json.optBoolean("vertical", false),
                 width = json.optDouble("width", 1.0).toFloat().coerceIn(0.1f, 1f),
                 height = json.optDouble("height", 1.0).toFloat().coerceIn(0.1f, 1f),
             )
@@ -184,6 +213,25 @@ data class Layout(val controls: List<Control> = emptyList()) {
      */
     fun forKey(keyCode: Int): Control? =
         controls.firstOrNull { it.isButton && it.keyCode == keyCode && it.bound }
+
+    /**
+     * The strip a button steps, and which way.
+     *
+     * Returns null when no strip answers to it. A strip's two buttons are
+     * separate bindings on one control, so this is how a key event finds both
+     * the control and the direction in one look.
+     */
+    fun stripFor(keyCode: Int): Pair<Control, Int>? {
+        if (keyCode == 0) return null
+        for (control in controls) {
+            if (!control.isStrip) continue
+            if (control.keyCode == keyCode) return control to 1
+            if (control.keyCodePrev == keyCode) return control to -1
+        }
+        return null
+    }
+
+    fun strips(): List<Control> = controls.filter { it.isStrip }
 
     /** Every stick or cursor control that is actually bound to a stick. */
     fun sticks(): List<Control> = controls.filter { it.isStick && it.bound }
@@ -230,13 +278,47 @@ data class Layout(val controls: List<Control> = emptyList()) {
         )
     }
 
+    /** Puts [keyCode] on a strip's backwards direction, taking it off anything else. */
+    fun bindPrev(id: String, keyCode: Int): Layout {
+        val target = this[id]
+        if (target == null || !target.isStrip) return this
+        return Layout(
+            controls.map {
+                when {
+                    // The control being bound has to give the key up from its
+                    // other direction too, or one button steps forward and
+                    // back at once and the strip never moves.
+                    it.id == id -> it.copy(
+                        keyCodePrev = keyCode,
+                        keyCode = if (it.keyCode == keyCode) 0 else it.keyCode,
+                    )
+                    it.isButton && it.keyCode == keyCode -> it.copy(keyCode = 0)
+                    it.isStrip && it.keyCode == keyCode -> it.copy(keyCode = 0)
+                    it.isStrip && it.keyCodePrev == keyCode -> it.copy(keyCodePrev = 0)
+                    else -> it
+                }
+            }
+        )
+    }
+
     fun bind(id: String, keyCode: Int): Layout {
         if (this[id] == null) return this
         return Layout(
             controls.map {
                 when {
-                    it.id == id -> it.copy(keyCode = keyCode)
+                    // Same rule the other way: binding a strip's forward
+                    // direction to the key its backward direction held has to
+                    // free the backward one.
+                    it.id == id -> it.copy(
+                        keyCode = keyCode,
+                        keyCodePrev =
+                            if (it.keyCodePrev == keyCode) 0 else it.keyCodePrev,
+                    )
                     it.isButton && it.keyCode == keyCode -> it.copy(keyCode = 0)
+                    // A strip's two directions are bindings too, and two
+                    // controls on one button would fire both.
+                    it.isStrip && it.keyCode == keyCode -> it.copy(keyCode = 0)
+                    it.isStrip && it.keyCodePrev == keyCode -> it.copy(keyCodePrev = 0)
                     else -> it
                 }
             }

@@ -207,6 +207,23 @@ one button cannot drive two controls, a control cannot be dragged off screen, a
 sweep covers most of the screen before it hitches — are tested without a device.
 30 tests.
 
+## Slot strips
+
+A game that wants a bar poked directly — a squad along the bottom, a belt of
+items — has no button to bind to, only places to tap. A **slot strip** turns
+them into one axis: bind a shoulder button to step forward and the other to step
+back, and every press taps the slot it lands on.
+
+Drag it over the bar, set how many slots it has, and flip it between **across**
+and **down** for a bar that runs the other way. The slots are spaced evenly
+along the strip's length and centred across its width, so a five-slot strip laid
+over a five-slot bar lines up by construction rather than by nudging each one
+into place.
+
+Stepping wraps. A squad bar is a ring in practice, and one shoulder button
+getting you all the way round beats stopping at the end and reaching for the
+other.
+
 ## Two kinds of stick
 
 **Aim stick** presses, then holds a finger *away* from where it pressed. That is

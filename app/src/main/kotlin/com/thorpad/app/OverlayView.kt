@@ -94,6 +94,14 @@ class OverlayView(context: Context) : View(context) {
 
     private var dragging: String? = null
 
+    /** Which slot each strip is showing as chosen. */
+    private val stripAt = mutableMapOf<String, Int>()
+
+    fun showStrip(id: String, slot: Int) {
+        stripAt[id] = slot
+        postInvalidateOnAnimation()
+    }
+
     /** The crosshair, in fractions of the screen, once a cursor stick moves it. */
     private var cursorX: Float = -1f
     private var cursorY: Float = -1f
@@ -176,6 +184,47 @@ class OverlayView(context: Context) : View(context) {
             )
         }
 
+        // Strips first and underneath: the slots are places on the screen
+        // rather than controls in their own right, and drawing them over a
+        // marker would hide the thing that says what the strip is.
+        for (control in layout.controls) {
+            if (!control.isStrip) continue
+            val chosen = stripAt[control.id] ?: -1
+            val points = Strip.slotPoints(control)
+            val size = minOf(width, height) * 0.028f
+
+            for ((i, point) in points.withIndex()) {
+                val px = point.first * width
+                val py = point.second * height
+                val lit = i == chosen
+                val colour = when {
+                    lit -> Color.parseColor("#FFD54A")
+                    control.bound -> Color.parseColor("#7FD7A3")
+                    else -> Color.parseColor("#E0725A")
+                }
+                val alpha = when {
+                    lit -> 230
+                    editing -> 190
+                    paintMarkers -> 80
+                    else -> 0
+                }
+                if (alpha == 0) continue
+
+                ring.color = colour
+                ring.alpha = alpha
+                canvas.drawCircle(px, py, size, ring)
+                if (lit) {
+                    fill.color = colour
+                    fill.alpha = 70
+                    canvas.drawCircle(px, py, size, fill)
+                }
+                if (editing) {
+                    small.alpha = 200
+                    canvas.drawText("${i + 1}", px, py + size + 22f, small)
+                }
+            }
+        }
+
         for (control in layout.controls) {
             val cx = control.x * width
             val cy = control.y * height
@@ -219,6 +268,8 @@ class OverlayView(context: Context) : View(context) {
                 small.alpha = 220
                 canvas.drawText(
                     when {
+                        control.isStrip -> "${control.slots} slots · " +
+                            (if (control.vertical) "down" else "across")
                         control.isStick && control.bound ->
                             "${control.stick!!.name.lowercase()} stick" +
                                 if (control.isCursor) " · crosshair" else " · drag"

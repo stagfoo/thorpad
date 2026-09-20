@@ -397,6 +397,7 @@ class MainActivity : Activity() {
         adders.addView(button("Button") { addControl() })
         adders.addView(button("Aim stick") { addStick(Kind.STICK) })
         adders.addView(button("Crosshair") { addStick(Kind.CURSOR) })
+        adders.addView(button("Slot strip") { addStrip() })
         root.addView(adders)
         root.addView(
             note(
@@ -721,6 +722,15 @@ class MainActivity : Activity() {
                         "${control.label}  →  ${control.stick!!.name.lowercase()} stick" +
                             if (control.isDragStick) "  (aim)" else "  (crosshair)"
                     control.isStick -> "${control.label}  →  no stick"
+                    control.isStrip -> {
+                        val fwd = if (control.keyCode != 0) {
+                            Buttons.nameOf(control.keyCode)
+                        } else "—"
+                        val back = if (control.keyCodePrev != 0) {
+                            Buttons.nameOf(control.keyCodePrev)
+                        } else "—"
+                        "${control.label}  →  $back / $fwd  (${control.slots} slots)"
+                    }
                     control.releasesAim ->
                         "${control.label}  →  ${Buttons.nameOf(control.keyCode)}" +
                             "  (ends the aim)"
@@ -739,7 +749,28 @@ class MainActivity : Activity() {
                 layoutParams = LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f)
             })
 
-            if (control.isStick) {
+            if (control.isStrip) {
+                box.addView(button("→") { learn(control.id) })
+                box.addView(button("←") { learnPrev(control.id) })
+                box.addView(button("${control.slots}") {
+                    val next = if (control.slots >= 8) 2 else control.slots + 1
+                    update(layoutNow().replace(control.copy(slots = next)))
+                })
+                box.addView(button(if (control.vertical) "↕" else "↔") {
+                    // The length runs along whichever way it points, so the two
+                    // swap when it turns — otherwise turning a wide strip
+                    // vertical makes a stubby one.
+                    update(
+                        layoutNow().replace(
+                            control.copy(
+                                vertical = !control.vertical,
+                                width = control.height,
+                                height = control.width,
+                            )
+                        )
+                    )
+                })
+            } else if (control.isStick) {
                 box.addView(button(if (control.isDragStick) "✛" else "aim") {
                     update(
                         layoutNow().replace(
@@ -849,6 +880,36 @@ class MainActivity : Activity() {
         )
     }
 
+    /**
+     * A row of slots for a bar the game wants poked directly.
+     *
+     * Laid across the bottom by default, which is where that bar is in every
+     * game that has one.
+     */
+    private fun addStrip() {
+        val layout = layoutNow()
+        update(
+            layout.add(
+                Control(
+                    id = Layout.nextId(layout),
+                    label = "slots",
+                    keyCode = 0,
+                    x = 0.5f,
+                    y = 0.9f,
+                    kind = Kind.STRIP,
+                    slots = 5,
+                    width = 0.8f,
+                    height = 0.12f,
+                )
+            )
+        )
+        remark(
+            "Drag it over the bar, set the slot count, then bind one button to " +
+                "step forward and another to step back.",
+            Mood.PLEASED,
+        )
+    }
+
     private fun addStick(kind: Kind) {
         val layout = layoutNow()
         val taken = layout.sticks().mapNotNull { it.stick }.toSet()
@@ -897,6 +958,24 @@ class MainActivity : Activity() {
      * is the better way round: the controls are placed over the game, so that
      * is where you are looking when you decide what a button should do.
      */
+    /** Arms a strip's backwards direction for the next button pressed. */
+    private fun learnPrev(id: String) {
+        if (!TapService.isEnabled(this)) {
+            status.text = "Turn on Accessibility first — that is what sees " +
+                "the gamepad."
+            return
+        }
+        val running = service ?: run {
+            OverlayService.send(this, OverlayService.ACTION_START)
+            status.text = "Starting the controls — press ← again."
+            return
+        }
+        running.learningFor = id
+        running.learningPrev = true
+        status.text = "Press the button that should step backwards…"
+        status.setTextColor(Color.parseColor("#6FC9FF"))
+    }
+
     private fun learn(id: String) {
         if (!TapService.isEnabled(this)) {
             status.text = "Turn on Accessibility first — that is what sees " +
@@ -910,6 +989,7 @@ class MainActivity : Activity() {
             return
         }
         running.learningFor = id
+        running.learningPrev = false
         status.text = "Press the button you want for this control…"
         status.setTextColor(Color.parseColor("#6FC9FF"))
     }
