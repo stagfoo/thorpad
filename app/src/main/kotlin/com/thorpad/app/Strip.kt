@@ -42,6 +42,42 @@ object Strip {
         }
     }
 
+    /** The two ends of a strip, along its own axis, in fractions. */
+    fun ends(control: Control): Pair<Float, Float> {
+        val along = if (control.vertical) control.height else control.width
+        val centre = if (control.vertical) control.y else control.x
+        return (centre - along / 2f) to (centre + along / 2f)
+    }
+
+    /** How short a strip may get: below this the slots overlap into one blob. */
+    const val MIN_LENGTH = 0.06f
+
+    /**
+     * Where a strip ends up when one end is dragged to [to].
+     *
+     * Returns the new centre and length along its axis. The end that was not
+     * dragged stays exactly where it is — which is the whole point of dragging
+     * an end rather than a slider: you are lining the strip up against
+     * something you can see, one edge at a time.
+     *
+     * Dragging an end past the other flips rather than collapsing, because
+     * stopping dead at zero length leaves a strip you cannot get back.
+     */
+    fun resizeFromEnd(control: Control, movingLowEnd: Boolean, to: Float): Pair<Float, Float> {
+        val (low, high) = ends(control)
+        val anchor = if (movingLowEnd) high else low
+        val moved = to.coerceIn(0f, 1f)
+
+        var length = kotlin.math.abs(moved - anchor)
+        if (length < MIN_LENGTH) length = MIN_LENGTH
+
+        val centre = if (moved < anchor) anchor - length / 2f else anchor + length / 2f
+        // Pulled back inside the screen rather than clipped, so a strip dragged
+        // off the edge keeps the length it was given.
+        val half = length / 2f
+        return centre.coerceIn(half, 1f - half) to length
+    }
+
     /**
      * The slot a press lands on.
      *

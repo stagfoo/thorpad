@@ -55,6 +55,9 @@ class OverlayView(context: Context) : View(context) {
         }
 
     var onMoved: ((String, Float, Float) -> Unit)? = null
+
+    /** A strip end was dragged: id, whether it was the low end, and where to. */
+    var onStripEnd: ((String, Boolean, Float) -> Unit)? = null
     var onPicked: ((String) -> Unit)? = null
 
     private val flashes = mutableMapOf<String, Long>()
@@ -93,6 +96,9 @@ class OverlayView(context: Context) : View(context) {
     private var doneRect: android.graphics.RectF? = null
 
     private var dragging: String? = null
+
+    /** The strip end being dragged, if that is what this gesture is. */
+    private var draggingEnd: Pair<String, Boolean>? = null
 
     /** Which slot each strip is showing as chosen. */
     private val stripAt = mutableMapOf<String, Int>()
@@ -223,6 +229,22 @@ class OverlayView(context: Context) : View(context) {
                     canvas.drawText("${i + 1}", px, py + size + 22f, small)
                 }
             }
+
+            // The handles that set how long it is. Drawn only while editing —
+            // the slots are bunched together in most games, and a strip spread
+            // across the whole screen taps empty air, so being able to pull the
+            // ends in is the difference between working and not.
+            if (editing) {
+                val (low, high) = Strip.ends(control)
+                for (isLow in listOf(true, false)) {
+                    val at = if (isLow) low else high
+                    val hx = if (control.vertical) control.x * width else at * width
+                    val hy = if (control.vertical) at * height else control.y * height
+                    fill.color = Color.parseColor("#6FC9FF")
+                    fill.alpha = 200
+                    canvas.drawCircle(hx, hy, handleRadius(), fill)
+                }
+            }
         }
 
         for (control in layout.controls) {
@@ -337,7 +359,7 @@ class OverlayView(context: Context) : View(context) {
                 if (selectedId != null) {
                     "press a gamepad button to bind it · drag to move · DONE"
                 } else {
-                    "tap a control to bind it · drag to move · DONE when finished"
+                    "tap to bind · drag to move · pull a strip's blue ends to fit"
                 },
                 24f, 76f, small,
             )
@@ -365,12 +387,41 @@ class OverlayView(context: Context) : View(context) {
         if (animating) postInvalidateOnAnimation()
     }
 
+    /** How big a strip's end handles are, and how near counts as grabbing one. */
+    private fun handleRadius(): Float = minOf(width, height) * 0.022f
+
+    /** The strip end under a touch, if any. Checked before the controls. */
+    private fun endUnder(x: Float, y: Float): Pair<String, Boolean>? {
+        val grab = handleRadius() * 2.2f
+        for (control in layout.controls) {
+            if (!control.isStrip) continue
+            val (low, high) = Strip.ends(control)
+            for (isLow in listOf(true, false)) {
+                val at = if (isLow) low else high
+                val hx = if (control.vertical) control.x * width else at * width
+                val hy = if (control.vertical) at * height else control.y * height
+                if ((hx - x) * (hx - x) + (hy - y) * (hy - y) <= grab * grab) {
+                    return control.id to isLow
+                }
+            }
+        }
+        return null
+    }
+
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (!editing) return false
         val radius = radiusFor()
 
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
+                // Ends before bodies: a handle sits on top of the strip it
+                // belongs to, and grabbing it has to mean resizing rather than
+                // dragging the whole thing away.
+                endUnder(event.x, event.y)?.let { end ->
+                    draggingEnd = end
+                    selectedId = end.first
+                    return true
+                }
                 doneRect?.let { rect ->
                     if (rect.contains(event.x, event.y)) {
                         onDone?.invoke()
@@ -389,14 +440,22 @@ class OverlayView(context: Context) : View(context) {
             }
 
             MotionEvent.ACTION_MOVE -> {
+                draggingEnd?.let { (id, isLow) ->
+                    val control = layout[id] ?: return true
+                    val along =
+                        if (control.vertical) event.y / height else event.x / width
+                    onStripEnd?.invoke(id, isLow, along)
+                    return true
+                }
                 val id = dragging ?: return false
                 onMoved?.invoke(id, event.x / width, event.y / height)
                 return true
             }
 
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                val was = dragging
+                val was = dragging ?: draggingEnd?.first
                 dragging = null
+                draggingEnd = null
                 return was != null
             }
         }

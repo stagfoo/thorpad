@@ -192,4 +192,70 @@ class StripTest {
         assertEquals(0, layout["squad"]!!.keyCodePrev)
         assertEquals(1, layout.stripFor(102)?.second)
     }
+
+    // ---------------------------------------------------- sizing by its ends
+
+    @Test fun `the end you are not dragging stays put`() {
+        // The whole reason to drag an end rather than move a slider: you are
+        // lining the strip up against something you can see, one edge at a time.
+        val control = strip(x = 0.5f, width = 0.8f)   // ends at 0.1 and 0.9
+        val (centre, length) = Strip.resizeFromEnd(control, movingLowEnd = true, to = 0.4f)
+
+        assertEquals("high end moved", 0.9f, centre + length / 2f, 0.0001f)
+        assertEquals(0.5f, length, 0.0001f)
+    }
+
+    @Test fun `dragging the far end keeps the near one`() {
+        val control = strip(x = 0.5f, width = 0.8f)
+        val (centre, length) = Strip.resizeFromEnd(control, movingLowEnd = false, to = 0.6f)
+
+        assertEquals("low end moved", 0.1f, centre - length / 2f, 0.0001f)
+        assertEquals(0.5f, length, 0.0001f)
+    }
+
+    @Test fun `a strip cannot be squashed into a blob`() {
+        val control = strip(x = 0.5f, width = 0.8f)
+        val (_, length) = Strip.resizeFromEnd(control, movingLowEnd = true, to = 0.9f)
+        assertEquals(Strip.MIN_LENGTH, length, 0.0001f)
+    }
+
+    @Test fun `dragging an end past the other flips rather than collapsing`() {
+        // Stopping dead at zero would leave a strip you cannot get back.
+        val control = strip(x = 0.5f, width = 0.4f)   // 0.3 to 0.7
+        val (centre, length) = Strip.resizeFromEnd(control, movingLowEnd = true, to = 0.95f)
+
+        assertTrue("length $length", length > Strip.MIN_LENGTH)
+        assertTrue("centre $centre should be past the anchor", centre > 0.7f)
+    }
+
+    @Test fun `a resized strip stays on the screen`() {
+        val control = strip(x = 0.5f, width = 0.4f)
+        for (to in listOf(-0.5f, 0f, 1f, 1.5f)) {
+            val (centre, length) = Strip.resizeFromEnd(control, true, to)
+            assertTrue("$to -> $centre ± $length", centre - length / 2f >= -0.0001f)
+            assertTrue("$to -> $centre ± $length", centre + length / 2f <= 1.0001f)
+        }
+    }
+
+    @Test fun `sizing it to a cluster puts every slot inside that cluster`() {
+        // The actual job: a bar of five portraits bunched in the middle of a
+        // wide screen, not spread across it.
+        var control = strip(slots = 5, x = 0.5f, width = 0.9f)
+        var (centre, length) = Strip.resizeFromEnd(control, movingLowEnd = true, to = 0.39f)
+        control = control.copy(x = centre, width = length)
+        val sized = Strip.resizeFromEnd(control, movingLowEnd = false, to = 0.66f)
+        control = control.copy(x = sized.first, width = sized.second)
+
+        for ((x, _) in Strip.slotPoints(control)) {
+            assertTrue("slot at $x escaped the cluster", x in 0.38f..0.67f)
+        }
+    }
+
+    @Test fun `a vertical strip resizes along its own axis`() {
+        val control = strip(vertical = true, x = 0.9f, y = 0.5f, height = 0.6f)
+        val (centre, length) = Strip.resizeFromEnd(control, movingLowEnd = true, to = 0.4f)
+
+        assertEquals(0.8f, centre + length / 2f, 0.0001f)
+        assertEquals(0.4f, length, 0.0001f)
+    }
 }

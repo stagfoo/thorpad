@@ -214,11 +214,16 @@ items — has no button to bind to, only places to tap. A **slot strip** turns
 them into one axis: bind a shoulder button to step forward and the other to step
 back, and every press taps the slot it lands on.
 
-Drag it over the bar, set how many slots it has, and flip it between **across**
-and **down** for a bar that runs the other way. The slots are spaced evenly
-along the strip's length and centred across its width, so a five-slot strip laid
-over a five-slot bar lines up by construction rather than by nudging each one
-into place.
+Drag it over the bar, then **pull its blue end handles** until the slots sit on
+the real ones. That is the part that matters: a bar of portraits is clustered in
+the middle of a wide screen rather than spread across it, so a strip sized to the
+screen taps empty air on both sides. Dragging an end leaves the other exactly
+where it is, so you line it up one edge at a time against something you can see.
+
+Within that length the slots are evenly spaced and centred across the width, so
+a five-slot strip sized to a five-slot bar lines up by construction rather than
+by nudging each one into place. **↔ / ↕** flips it for a bar that runs the other
+way, swapping its length and width with it.
 
 Stepping wraps. A squad bar is a ring in practice, and one shoulder button
 getting you all the way round beats stopping at the end and reaching for the

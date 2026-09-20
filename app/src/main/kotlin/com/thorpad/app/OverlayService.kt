@@ -261,6 +261,21 @@ class OverlayService : Service() {
         prefs.edit().putFloat("sensitivity", clamped).apply()
     }
 
+    /** Drags one end of a strip, leaving the other exactly where it is. */
+    private fun resizeStrip(id: String, movingLowEnd: Boolean, to: Float) {
+        val control = layout[id] ?: return
+        val (centre, length) = Strip.resizeFromEnd(control, movingLowEnd, to)
+        update(
+            layout.replace(
+                if (control.vertical) {
+                    control.copy(y = centre, height = length)
+                } else {
+                    control.copy(x = centre, width = length)
+                }
+            )
+        )
+    }
+
     private fun moveControl(id: String, x: Float, y: Float) {
         val control = layout[id] ?: return
         update(layout.replace(control.movedTo(x, y)))
@@ -309,6 +324,7 @@ class OverlayService : Service() {
             onMotion = { event -> this@OverlayService.onMotion(event) }
             onKey = { event -> this@OverlayService.onFocusedKey(event) }
             onMoved = ::moveControl
+            onStripEnd = ::resizeStrip
             onPicked = { id ->
                 selectedId = id
                 // Tapping a control on the overlay always arms its main

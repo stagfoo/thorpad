@@ -898,14 +898,18 @@ class MainActivity : Activity() {
                     y = 0.9f,
                     kind = Kind.STRIP,
                     slots = 5,
-                    width = 0.8f,
+                    // Narrow to start with. A bar of portraits is clustered in
+                    // the middle of a wide screen, not spread across it, and a
+                    // strip that starts too wide taps empty air either side.
+                    width = 0.35f,
                     height = 0.12f,
                 )
             )
         )
         remark(
-            "Drag it over the bar, set the slot count, then bind one button to " +
-                "step forward and another to step back.",
+            "Drag it over the bar, then pull its blue ends until the slots sit " +
+                "on the real ones — they're usually bunched in the middle, not " +
+                "spread across the screen.",
             Mood.PLEASED,
         )
     }
