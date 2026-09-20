@@ -207,19 +207,28 @@ one button cannot drive two controls, a control cannot be dragged off screen, a
 sweep covers most of the screen before it hitches — are tested without a device.
 30 tests.
 
-## The crosshair stick
+## Two kinds of stick
 
-A crosshair stick moves a marker and injects nothing on its own. A button set to
-**✛ on** touches wherever the marker is — and **follows it while held**, so one
-finger holds and aims. That is what a game wants when holding zooms and dragging
-looks around.
+**Aim stick** presses, then holds a finger *away* from where it pressed. That is
+how a game like this turns: it reads how far the finger is from where it went
+down, and keeps turning for as long as it stays there. So deflection maps to a
+**position inside a region**, and the region's radius is the fastest the game
+will turn.
 
-There was a second stick kind that dragged a finger around the screen directly.
-It worked, and it carried the whole recentring problem with it: a drag ends at
-the edge of its region and has to lift and start again. Tested side by side on
-the device, the crosshair won, so the drag is gone rather than left in as a
-worse option to pick by mistake. A layout that used one loads as a crosshair on
-the same stick.
+This is the whole point of the project, and it took most of the build to get
+right. The first version treated deflection as *velocity* — the finger travelled
+while the stick was pushed — which is a mouse, not a thumb. It brought the
+run-out-of-screen problem with it, and a great deal of machinery for recentring
+when a drag reached the edge of its region. None of that exists here: the finger
+never leaves the circle, so there is nothing to run out of.
+
+It also explains the original complaint. Every other mapper pins the aim to a
+small fixed circle, which caps how fast the game can be made to turn. Here the
+region goes up to the whole screen, on a slider.
+
+**Crosshair** moves a marker and injects nothing on its own. A button set to
+**✛ on** touches wherever the marker is, and follows it while held — one finger
+holding and aiming, for when holding zooms and dragging looks around.
 
 **A button held at the crosshair follows it.** That is what makes the crosshair
 worth having rather than a novelty: in a game where holding zooms and dragging

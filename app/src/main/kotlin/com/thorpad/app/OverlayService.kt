@@ -625,6 +625,7 @@ class OverlayService : Service() {
         holding.clear()
         followingCursor.clear()
         cursors.clear()
+        drags.clear()
         stopSticks()
         val wm = manager
         val target = view
@@ -731,6 +732,7 @@ class OverlayService : Service() {
     // ------------------------------------------------------------- sticks
 
     private val cursors = mutableMapOf<String, CursorEngine>()
+    private val drags = mutableMapOf<String, DragStick>()
     private var lastTick = 0L
 
     @Volatile var motionSeen: Int = 0
@@ -806,8 +808,28 @@ class OverlayService : Service() {
         for (control in sticksBound) {
             val tuned = settings.within(control.region())
 
-            // Nothing is injected by the stick itself. The crosshair moves,
-            // and a button firing "at cursor" is what touches the screen.
+            if (control.isDragStick) {
+                val drag = drags.getOrPut(control.id) { DragStick(tuned) }
+                drag.reconfigure(tuned)
+                val step = drag.step(sx, sy, now)
+                val px = step.x * width
+                val py = step.y * height
+
+                when (step.action) {
+                    DragStick.Action.PRESS -> {
+                        view?.flash(control.id)
+                        tapper.holdJitter = 0f
+                        tapper.startDrag(control.id, px, py)
+                    }
+                    DragStick.Action.MOVE -> tapper.dragTo(control.id, px, py)
+                    DragStick.Action.LIFT -> tapper.releaseHold(control.id)
+                    DragStick.Action.NONE -> Unit
+                }
+                continue
+            }
+
+            // Nothing is injected by the crosshair itself. It moves, and a
+            // button firing "at cursor" is what touches the screen.
             run {
                 val cursor = cursors.getOrPut(control.id) {
                     CursorEngine(tuned).apply { centre() }

@@ -116,6 +116,10 @@ class LayoutTest {
         Control(id = id, label = id, keyCode = 0, x = x, y = y,
             kind = Kind.CURSOR, stick = s)
 
+    private fun aimStick(id: String, s: Stick? = null) =
+        Control(id = id, label = id, keyCode = 0, x = 0.5f, y = 0.5f,
+            kind = Kind.STICK, stick = s)
+
     @Test fun `a stick control is bound by a stick, not a key`() {
         val layout = Layout().add(stick("aim", Stick.RIGHT))
         assertTrue(layout["aim"]!!.bound)
@@ -185,6 +189,15 @@ class LayoutTest {
         assertTrue(region.bottom - region.top <= 1.001f)
     }
 
+    @Test fun `an aim stick survives being saved and loaded`() {
+        val layout = Layout().add(aimStick("aim", Stick.RIGHT).copy(width = 0.7f))
+        val restored = Layout.fromJson(layout.toJson())["aim"]!!
+
+        assertEquals(Kind.STICK, restored.kind)
+        assertEquals(0.7f, restored.width, 0.001f)
+        assertTrue(restored.bound)
+    }
+
     @Test fun `a stick survives being saved and loaded`() {
         val layout = Layout().add(
             stick("aim", Stick.RIGHT, x = 0.4f, y = 0.6f).copy(width = 0.8f)
@@ -219,17 +232,19 @@ class LayoutTest {
         assertEquals("aim", layout.cursor()?.id)
     }
 
-    @Test fun `a layout saved when dragging existed keeps working`() {
-        // The drag kind is gone, but a layout that used it must not come back
-        // with a stick bound to nothing. It becomes a crosshair on the same
-        // stick, which is the thing that replaced it.
+    @Test fun `an aim stick and a crosshair are different things`() {
+        // They answer different questions: one holds a finger off-centre so the
+        // game keeps turning, the other moves a marker for a button to touch.
+        // A layout must not quietly turn one into the other.
         val old = Layout.fromJson(
             """[{"id":"aim","label":"aim","keyCode":0,"x":0.5,"y":0.5,""" +
             """"kind":"STICK","stick":"RIGHT"}]"""
         )
-        assertEquals(Kind.CURSOR, old["aim"]!!.kind)
-        assertEquals(Stick.RIGHT, old["aim"]!!.stick)
-        assertEquals("aim", old.cursor()?.id)
+        assertEquals(Kind.STICK, old["aim"]!!.kind)
+        assertTrue(old["aim"]!!.isDragStick)
+        assertFalse(old["aim"]!!.isCursor)
+        assertNull("an aim stick is not somewhere to aim a tap", old.cursor())
+        assertEquals(1, old.sticks().size)
     }
 
     @Test fun `an unbound crosshair is not offered either`() {

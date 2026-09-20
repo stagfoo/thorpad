@@ -32,7 +32,14 @@ enum class Kind {
      */
     CURSOR,
 
-    /** Only ever read from an older saved layout; becomes [CURSOR] on load. */
+    /**
+     * A stick held as a finger offset from where it pressed.
+     *
+     * How the mappers that work do it: the game turns because the finger is
+     * away from where it went down, and keeps turning while it stays there. The
+     * region's size is the top turn rate, which is the whole reason to want one
+     * bigger than the small fixed circle every other mapper gives you.
+     */
     STICK,
 }
 
@@ -83,7 +90,9 @@ data class Control(
 
     val isStick: Boolean get() = kind == Kind.CURSOR || kind == Kind.STICK
 
-    val isCursor: Boolean get() = isStick
+    val isCursor: Boolean get() = kind == Kind.CURSOR
+
+    val isDragStick: Boolean get() = kind == Kind.STICK
 
     val isButton: Boolean get() = kind == Kind.BUTTON
 
@@ -139,12 +148,7 @@ data class Control(
                     Press.valueOf(json.optString("press", "TAP"))
                 }.getOrDefault(Press.TAP),
                 kind = runCatching {
-                    // A layout saved when dragging existed keeps working: the
-                    // stick it was bound to now moves a crosshair instead.
-                    when (Kind.valueOf(json.optString("kind", "BUTTON"))) {
-                        Kind.STICK -> Kind.CURSOR
-                        else -> Kind.valueOf(json.optString("kind", "BUTTON"))
-                    }
+                    Kind.valueOf(json.optString("kind", "BUTTON"))
                 }.getOrDefault(Kind.BUTTON),
                 stick = runCatching {
                     json.optString("stick").takeIf { it.isNotEmpty() }
@@ -203,7 +207,13 @@ data class Layout(val controls: List<Control> = emptyList()) {
                     // Keeps whichever stick kind it already was: changing a
                     // crosshair into a drag because its stick was reassigned
                     // would be a surprise.
-                    it.id == id -> it.copy(stick = stick, kind = Kind.CURSOR)
+                    // Keeps whichever stick kind it already was; reassigning
+                    // which thumbstick drives it is not a request to change
+                    // what it does.
+                    it.id == id -> it.copy(
+                        stick = stick,
+                        kind = if (it.isStick) it.kind else Kind.STICK,
+                    )
                     it.isStick && it.stick == stick -> it.copy(stick = null)
                     else -> it
                 }

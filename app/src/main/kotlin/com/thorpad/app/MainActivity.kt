@@ -43,6 +43,7 @@ class MainActivity : Activity() {
     private lateinit var holdJitter: View
     private lateinit var sensitivity: View
     private lateinit var cursorSize: View
+    private lateinit var aimRegion: View
 
     private val ticker = Handler(Looper.getMainLooper())
     private lateinit var mascot: MascotView
@@ -188,6 +189,22 @@ class MainActivity : Activity() {
                 "Markers hides the control circles and leaves the crosshair, " +
                     "since the crosshair is the thing you are actually looking " +
                     "at. Buttons keep working either way."
+            )
+        )
+
+        root.addView(section("aim stick"))
+        aimRegion = slider(
+            "Aim region",
+            0.25f..1f,
+            layoutNow().sticks().firstOrNull { it.isDragStick }?.width ?: 0.6f,
+            { "%.0f%% of the screen".format(it * 100) },
+        ) { value -> resizeAimRegion(value) }
+        root.addView(aimRegion)
+        root.addView(
+            note(
+                "How far the finger may sit from where it pressed — which is " +
+                    "the fastest the game will turn. Other mappers pin this to " +
+                    "a small circle; here it goes to the whole screen."
             )
         )
 
@@ -350,13 +367,17 @@ class MainActivity : Activity() {
 
         val adders = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL }
         adders.addView(button("Button") { addControl() })
-        adders.addView(button("Crosshair stick") { addStick(Kind.CURSOR) })
+        adders.addView(button("Aim stick") { addStick(Kind.STICK) })
+        adders.addView(button("Crosshair") { addStick(Kind.CURSOR) })
         root.addView(adders)
         root.addView(
             note(
-                "A button taps one point. A crosshair stick moves a marker " +
-                    "and injects nothing on its own — a button set to ✛ on " +
-                    "touches wherever the marker is, and follows it while held."
+                "An aim stick presses and holds a finger away from where it " +
+                    "pressed — which is how a game like this turns, and keeps " +
+                    "turning while the stick is held. Make its region bigger " +
+                    "and it turns faster; that is the small circle every other " +
+                    "mapper is stuck with.\n\nA crosshair moves a marker and " +
+                    "injects nothing, for a button set to ✛ on to touch."
             )
         )
         root.addView(
@@ -669,7 +690,8 @@ class MainActivity : Activity() {
             box.addView(TextView(this).apply {
                 text = when {
                     control.isStick && control.bound ->
-                        "${control.label}  →  ${control.stick!!.name.lowercase()} stick"
+                        "${control.label}  →  ${control.stick!!.name.lowercase()} stick" +
+                            if (control.isDragStick) "  (aim)" else "  (crosshair)"
                     control.isStick -> "${control.label}  →  no stick"
                     else -> "${control.label}  →  ${Buttons.nameOf(control.keyCode)}" +
                         if (control.press == Press.HOLD) {
@@ -687,6 +709,15 @@ class MainActivity : Activity() {
             })
 
             if (control.isStick) {
+                box.addView(button(if (control.isDragStick) "✛" else "aim") {
+                    update(
+                        layoutNow().replace(
+                            control.copy(
+                                kind = if (control.isDragStick) Kind.CURSOR else Kind.STICK
+                            )
+                        )
+                    )
+                })
                 box.addView(button("L") {
                     update(layoutNow().bindStick(control.id, Stick.LEFT))
                 })
@@ -754,6 +785,24 @@ class MainActivity : Activity() {
      * its region and has to lift and start again, so a smaller region only
      * means more of those hitches.
      */
+    /** The aim region is the turn rate, so it gets a slider of its own. */
+    private fun resizeAimRegion(size: Float) {
+        var layout = layoutNow()
+        val sticks = layout.controls.filter { it.isDragStick }
+        if (sticks.isEmpty()) {
+            status.text = "Add an aim stick first."
+            return
+        }
+        for (control in sticks) {
+            layout = layout.replace(control.copy(width = size, height = size))
+        }
+        update(layout)
+        remark(
+            "Aim region is %.0f%% of the screen. Bigger means the game turns " .format(size * 100) +
+                "faster at full tilt."
+        )
+    }
+
     private fun addStick(kind: Kind) {
         val layout = layoutNow()
         val taken = layout.sticks().mapNotNull { it.stick }.toSet()
@@ -768,6 +817,10 @@ class MainActivity : Activity() {
                     y = 0.5f,
                     kind = kind,
                     stick = free ?: Stick.RIGHT,
+                    // A big region by default, because a small one is the
+                    // limitation this exists to lift.
+                    width = if (kind == Kind.STICK) 0.7f else 1f,
+                    height = if (kind == Kind.STICK) 0.7f else 1f,
                 )
             )
         )
