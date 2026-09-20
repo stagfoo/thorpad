@@ -176,4 +176,61 @@ class DragStickTest {
         assertEquals(0.8f, cy, 0.0001f)
         assertEquals(0.4f, stick.offsetFor(1f, 0f).first, 0.001f)
     }
+
+    // ---------------------------------------------------- ending an aim
+
+    @Test fun `with the lift turned off, centring does not let go`() {
+        // A sniper fires when the finger comes up, so centring the stick to
+        // steady a shot would take it — which is the one thing the aim must
+        // not do on its own.
+        val stick = DragStick(AimSettings(holdMs = -1))
+        stick.step(1f, 0f, 0)
+
+        var t = 16L
+        while (t < 10_000) {
+            assertTrue(
+                "lifted at ${t}ms",
+                stick.step(0f, 0f, t).action != DragStick.Action.LIFT,
+            )
+            t += 16
+        }
+        assertTrue(stick.isDown)
+    }
+
+    @Test fun `the finger still returns to centre, so the view stops turning`() {
+        // Not lifting must not mean carrying on turning.
+        val stick = DragStick(AimSettings(holdMs = -1))
+        stick.step(1f, 0f, 0)
+        stick.step(1f, 0f, 16)
+
+        val settling = stick.step(0f, 0f, 32)
+        assertEquals(0.5f, settling.x, 0.0001f)
+        assertEquals(0.5f, settling.y, 0.0001f)
+    }
+
+    @Test fun `a release button ends it`() {
+        val stick = DragStick(AimSettings(holdMs = -1))
+        stick.step(1f, 0f, 0)
+        stick.step(1f, 0f, 16)
+
+        val lift = stick.release()
+        assertEquals(DragStick.Action.LIFT, lift?.action)
+        assertFalse(stick.isDown)
+    }
+
+    @Test fun `releasing when nothing is held does nothing`() {
+        // The button is bound to something you press in cover as well as out
+        // of it, so a spare press must not become a stray touch.
+        assertEquals(null, DragStick(AimSettings(holdMs = -1)).release())
+    }
+
+    @Test fun `after a release the stick can aim again`() {
+        val stick = DragStick(AimSettings(holdMs = -1))
+        stick.step(1f, 0f, 0)
+        stick.release()
+
+        val again = stick.step(1f, 0f, 100)
+        assertEquals(DragStick.Action.PRESS, again.action)
+        assertEquals(0.5f, again.x, 0.0001f)
+    }
 }

@@ -73,6 +73,13 @@ data class Control(
      */
     val atCursor: Boolean = false,
     /**
+     * For a button: lift whatever an aim stick is holding, instead of touching.
+     *
+     * A gun that fires when the finger comes up needs the release to be a
+     * decision rather than a consequence of centring the stick.
+     */
+    val releasesAim: Boolean = false,
+    /**
      * For a stick, how much of the screen the finger may drag across, as
      * fractions of it.
      *
@@ -131,6 +138,7 @@ data class Control(
         put("kind", kind.name)
         stick?.let { put("stick", it.name) }
         put("atCursor", atCursor)
+        put("releasesAim", releasesAim)
         put("width", width.toDouble())
         put("height", height.toDouble())
     }
@@ -155,6 +163,7 @@ data class Control(
                         ?.let { Stick.valueOf(it) }
                 }.getOrNull(),
                 atCursor = json.optBoolean("atCursor", false),
+                releasesAim = json.optBoolean("releasesAim", false),
                 width = json.optDouble("width", 1.0).toFloat().coerceIn(0.1f, 1f),
                 height = json.optDouble("height", 1.0).toFloat().coerceIn(0.1f, 1f),
             )

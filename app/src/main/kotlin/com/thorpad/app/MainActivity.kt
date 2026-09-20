@@ -44,6 +44,7 @@ class MainActivity : Activity() {
     private lateinit var sensitivity: View
     private lateinit var cursorSize: View
     private lateinit var aimRegion: View
+    private lateinit var aimHold: View
 
     private val ticker = Handler(Looper.getMainLooper())
     private lateinit var mascot: MascotView
@@ -200,6 +201,33 @@ class MainActivity : Activity() {
             { "%.0f%% of the screen".format(it * 100) },
         ) { value -> resizeAimRegion(value) }
         root.addView(aimRegion)
+        aimHold = slider(
+            "Lift after centring",
+            0f..3200f,
+            (service?.settings?.holdMs ?: 220).let { if (it < 0) 3200f else it.toFloat() },
+            { if (it >= 3100f) "never — use a release button" else "${it.toInt()}ms" },
+        ) { value ->
+            val ms = if (value >= 3100f) -1f else value
+            OverlayService.send(this, OverlayService.ACTION_AIM_HOLD, ms)
+            remark(
+                if (ms < 0) {
+                    "The aim will stay down until a release button ends it. " +
+                        "That's what a gun that fires on release needs."
+                } else {
+                    "Lifting ${value.toInt()}ms after you centre the stick. " +
+                        "Careful if the weapon fires when your finger comes up."
+                }
+            )
+            refresh()
+        }
+        root.addView(aimHold)
+        root.addView(
+            note(
+                "Centring the stick normally lifts the finger — which fires a " +
+                    "weapon that shoots on release. Set this to never and bind " +
+                    "a button to ↥ instead, so letting go is a decision."
+            )
+        )
         root.addView(
             note(
                 "How far the finger may sit from where it pressed — which is " +
@@ -693,6 +721,9 @@ class MainActivity : Activity() {
                         "${control.label}  →  ${control.stick!!.name.lowercase()} stick" +
                             if (control.isDragStick) "  (aim)" else "  (crosshair)"
                     control.isStick -> "${control.label}  →  no stick"
+                    control.releasesAim ->
+                        "${control.label}  →  ${Buttons.nameOf(control.keyCode)}" +
+                            "  (ends the aim)"
                     else -> "${control.label}  →  ${Buttons.nameOf(control.keyCode)}" +
                         if (control.press == Press.HOLD) {
                             "  (touch lasts as long as the button)"
@@ -738,6 +769,21 @@ class MainActivity : Activity() {
                 box.addView(button(if (control.atCursor) "✛ on" else "✛ off") {
                     update(
                         layoutNow().replace(control.copy(atCursor = !control.atCursor))
+                    )
+                })
+                box.addView(button(if (control.releasesAim) "↥ on" else "↥ off") {
+                    update(
+                        layoutNow().replace(
+                            control.copy(releasesAim = !control.releasesAim)
+                        )
+                    )
+                    remark(
+                        if (!control.releasesAim) {
+                            "That button now ends an aim instead of touching. " +
+                                "Bind it to whatever drops you back into cover."
+                        } else {
+                            "Back to a normal button."
+                        }
                     )
                 })
             }

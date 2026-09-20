@@ -226,6 +226,18 @@ It also explains the original complaint. Every other mapper pins the aim to a
 small fixed circle, which caps how fast the game can be made to turn. Here the
 region goes up to the whole screen, on a slider.
 
+### Guns that fire when you let go
+
+Centring the stick normally lifts the finger after a moment — and a weapon that
+shoots on release then shoots every time you centre to steady a shot. So **Lift
+after centring** runs from 0ms up to **never**, and a button can be set to **↥**,
+which ends the aim instead of touching anything.
+
+With those two together, letting go is a decision: hold the aim as long as you
+like, adjust, and drop out of it with the button you already use to get back
+into cover. The finger still returns to the centre of the region when the stick
+does, so not lifting does not mean carrying on turning.
+
 **Crosshair** moves a marker and injects nothing on its own. A button set to
 **✛ on** touches wherever the marker is, and follows it while held — one finger
 holding and aiming, for when holding zooms and dragging looks around.

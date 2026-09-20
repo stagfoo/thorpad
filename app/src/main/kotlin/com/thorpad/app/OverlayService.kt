@@ -59,6 +59,9 @@ class OverlayService : Service() {
         /** Get the overlay out of the way while a tap lands. */
         const val ACTION_DUCK = "duck"
 
+        /** Sets how long after centring an aim stick lifts; negative is never. */
+        const val ACTION_AIM_HOLD = "aim-hold"
+
         /** Carries a slider's value alongside its action. */
         const val EXTRA_VALUE = "value"
 
@@ -194,6 +197,7 @@ class OverlayService : Service() {
         cursorSize = prefs.getFloat("cursorSize", 0.035f)
         settings = settings.copy(
             maxSpeed = prefs.getFloat("sensitivity", settings.maxSpeed),
+            holdMs = prefs.getInt("aimHoldMs", settings.holdMs),
         )
         duck = prefs.getBoolean("duck", false)
     }
@@ -221,6 +225,11 @@ class OverlayService : Service() {
             ACTION_CURSOR_SIZE -> cursorSize = intent.getFloatExtra(EXTRA_VALUE, 0.035f)
             ACTION_JITTER -> holdJitter = intent.getFloatExtra(EXTRA_VALUE, 2f)
             ACTION_TAP_MS -> tapMs = intent.getFloatExtra(EXTRA_VALUE, 140f).toLong()
+            ACTION_AIM_HOLD -> {
+                val ms = intent.getFloatExtra(EXTRA_VALUE, 220f).toInt()
+                settings = settings.copy(holdMs = ms)
+                prefs.edit().putInt("aimHoldMs", ms).apply()
+            }
             ACTION_DUCK -> {
                 duck = !duck
                 prefs.edit().putBoolean("duck", duck).apply()
@@ -671,6 +680,15 @@ class OverlayService : Service() {
         val control = layout.forKey(event.keyCode) ?: return false
         val tapper = TapService.instance ?: return false
 
+        // A release button ends an aim rather than touching anything itself.
+        if (control.releasesAim) {
+            if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+                view?.flash(control.id)
+                releaseAim()
+            }
+            return true
+        }
+
         val bounds = view
         val width = (bounds?.width ?: 0).toFloat()
         val height = (bounds?.height ?: 0).toFloat()
@@ -847,6 +865,21 @@ class OverlayService : Service() {
                 }
             }
 
+        }
+    }
+
+    /**
+     * Lifts every aim stick that is currently holding.
+     *
+     * The deliberate end of an aim, for a weapon that fires when the finger
+     * comes up — where centring the stick to steady a shot must not be the
+     * thing that takes the shot.
+     */
+    fun releaseAim() {
+        val tapper = TapService.instance ?: return
+        for ((id, drag) in drags) {
+            drag.release() ?: continue
+            tapper.releaseHold(id)
         }
     }
 

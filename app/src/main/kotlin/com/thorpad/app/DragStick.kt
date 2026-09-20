@@ -48,6 +48,21 @@ class DragStick(private var config: AimSettings) {
         idleSince = -1L
     }
 
+    /**
+     * Lifts the finger now, whatever the stick is doing.
+     *
+     * For a gun that fires when you let go. With the automatic lift turned off,
+     * this is the only thing that ends an aim — which is the point: releasing
+     * should be a decision, not a side effect of centring the stick to steady
+     * a shot.
+     */
+    fun release(): Step? {
+        if (!down) return null
+        down = false
+        idleSince = -1L
+        return Step(Action.LIFT, atX, atY)
+    }
+
     /** The middle of the region, which is where a press lands. */
     fun centre(): Pair<Float, Float> = Pair(
         (config.regionLeft + config.regionRight) / 2f,
@@ -110,7 +125,10 @@ class DragStick(private var config: AimSettings) {
             // Held for a moment rather than lifted on the instant: letting go
             // of the stick between two small corrections should not cost a
             // press and a re-press, which the game sees as a fresh drag.
-            if (nowMs - idleSince >= config.holdMs) {
+            // A negative hold means never lift on its own. Some weapons fire
+            // when the finger comes up, so centring the stick to steady a shot
+            // would take it — the release has to be something you ask for.
+            if (config.holdMs >= 0 && nowMs - idleSince >= config.holdMs) {
                 down = false
                 idleSince = -1L
                 return Step(Action.LIFT, atX, atY)
